@@ -33,10 +33,20 @@ class TestParseGsm8kAnswer:
         assert ok is True
         assert val == 42.0
 
-    def test_no_hash_pattern(self):
+    def test_cue_answer_is(self):
         val, ok = parse_gsm8k_answer("The answer is 18")
-        assert ok is False
-        assert val is None
+        assert ok is True
+        assert val == 18.0
+
+    def test_cue_final_answer(self):
+        val, ok = parse_gsm8k_answer("After solving, Final Answer: 27")
+        assert ok is True
+        assert val == 27.0
+
+    def test_last_number_fallback(self):
+        val, ok = parse_gsm8k_answer("I computed 3 + 5 = 8")
+        assert ok is True
+        assert val == 8.0
 
     def test_empty_string(self):
         val, ok = parse_gsm8k_answer("")
@@ -63,3 +73,8 @@ class TestParseGsm8kAnswer:
         val, ok = parse_gsm8k_answer("####   42  ")
         assert ok is True
         assert val == 42.0
+
+    def test_no_number(self):
+        val, ok = parse_gsm8k_answer("I cannot solve this")
+        assert ok is False
+        assert val is None
