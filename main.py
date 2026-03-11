@@ -12,11 +12,10 @@ import sys
 sys.path.append(os.path.abspath("."))
 
 from src.models import (
-    ProblemRecord,
-    DiagnosisResult,
-    ReferenceSolution,
+    SolverResponse,
+    SolverStatus,
 )
-from src.solver.qwen_client import QwenSolverClient # Optional, we can use adapter directly
+from src.solver.reference_parser import parse_solver_response, ParseStatus
 from src.checker.answer_checker import check_answer
 from src.diagnosis.engine import diagnose
 from src.hint.controller import HintController
@@ -34,29 +33,34 @@ def run_tutor_demo():
 
     # 1. Input Problem (GSM8K Style)
     problem_text = "Jan has 3 apples. She buys 5 more apples. How many apples does Jan have now?"
-    gold_answer = "#### 8" # GSM8K format
     student_answer_raw = "She has 6 apples." # Wrong answer for demo
     
     print(f"--- PROBLEM ---\n{problem_text}")
     print(f"--- STUDENT ANSWER ---\n{student_answer_raw}\n")
 
-    # 2. Reference Solution (Using real LLM)
+    # 2. Reference Solution (Using real LLM + parser)
     print("Step 1: Generating Reference Solution...")
-    # For a simple demo, we can simulate the ReferenceSolution object 
-    # OR use the hf_llm_adapter to actually solve it.
-    # Let's use the adapter to keep it simple but "real".
     solve_prompt = f"Solve this math problem and provide the numeric answer at the end preceded by '#### '.\n\nProblem: {problem_text}"
     raw_solve = hf_llm_adapter(solve_prompt)
-    
-    # Normally we'd use solver/reference_parser, but let's mock the struct for now
-    # to ensure the pipeline continues even if parser is sensitive to text formats
-    ref_sol = ReferenceSolution(
-        final_answer=8.0, 
-        solution_text=raw_solve,
-        confidence=1.0,
-        schema_version="1.0",
-        source="qwen-hf"
+
+    solver_response = SolverResponse(
+        raw_text=raw_solve,
+        status=SolverStatus.SUCCESS,
+        model_name="Qwen/Qwen2.5-Math-7B-Instruct",
+        latency_ms=0.0,
+        attempt_count=1,
     )
+    parse_result = parse_solver_response(solver_response)
+    if parse_result.status != ParseStatus.SUCCESS or parse_result.reference is None:
+        print("ERROR: Failed to parse reference answer from solver output.")
+        print(f"Parse status: {parse_result.status.value}")
+        print(f"Details: {parse_result.error_message}")
+        print("Raw solver output:")
+        print(raw_solve)
+        return
+
+    ref_sol = parse_result.reference
+    print(f"Parser status: {parse_result.status.value}")
     print(f"Reference Answer: {ref_sol.final_answer}\n")
 
     # 3. Answer Checking

@@ -4,7 +4,7 @@ A solver-grounded math tutoring system for multi-step word problems (GSM8K-style
 
 ## 🚀 Key Features
 
-- **Reference Solver:** Generates high-quality step-by-step solutions via Qwen2.5-Math.
+- **Reference Solver + Parser:** Generates step-by-step solutions via Qwen2.5-Math and parses `#### <answer>` into structured `ReferenceSolution`.
 - **Answer Checker:** Robust normalization and comparison of student and reference answers.
 - **Diagnosis Engine:** Classifies student errors (Arithmetic, Relation, Target Misunderstanding, etc.).
 - **Pedagogical Hinting:** Generates conceptual, relational, or next-step hints.
@@ -30,6 +30,11 @@ Run the end-to-end demo script:
 python main.py
 ```
 
+Run a small evaluation harness (recommended for research iterations):
+```bash
+python run_eval.py --split test --limit 50
+```
+
 ## 🧪 Testing
 
 Run normalized unit tests:
@@ -45,3 +50,13 @@ pytest
 - `src/hint`: Hint generation and verification pipeline.
 - `src/models`: Shared Pydantic data contracts.
 - `src/utils`: Shared utilities (LLM adapters).
+
+
+### Model Configuration
+
+`src/utils/llm_client.py` defaults to `Qwen/Qwen2.5-Math-7B-Instruct` to stay aligned with solver settings.
+You can override this with:
+
+```bash
+export HF_MODEL_ID="Qwen/Qwen2.5-Math-7B-Instruct"
+```

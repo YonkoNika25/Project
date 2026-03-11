@@ -21,8 +21,7 @@ def hf_llm_adapter(prompt: str) -> str:
         client = InferenceClient(api_key=api_key)
         
         # Using a model that is often available on free Serverless Inference
-        model_id = "Qwen/Qwen2.5-7B-Instruct" 
-        # Alternatively: "Qwen/Qwen2.5-Math-1.5B-Instruct"
+        model_id = os.environ.get("HF_MODEL_ID", "Qwen/Qwen2.5-Math-7B-Instruct")
         
         completion = client.chat.completions.create(
             model=model_id,
