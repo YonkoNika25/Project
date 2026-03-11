@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# BMAD specific
+_bmad-output/
+_bmad/
+_agents/
+_agent/
+brain/
+.gemini/
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
