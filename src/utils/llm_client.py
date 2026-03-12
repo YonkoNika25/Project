@@ -22,18 +22,6 @@ def openrouter_llm_adapter(prompt: str) -> str:
         # User specified qwen/qwen-2.5-7b-instruct
         model_id = os.environ.get("OPENROUTER_MODEL_ID", "qwen/qwen-2.5-7b-instruct")
         
-<<<<<<< HEAD
-        # Using a model that is often available on free Serverless Inference
-        model_id = os.environ.get("HF_MODEL_ID", "Qwen/Qwen2.5-Math-7B-Instruct")
-        
-        completion = client.chat.completions.create(
-            model=model_id,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1024,
-            temperature=0.1, # Low temperature for reasoning tasks
-=======
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -48,7 +36,6 @@ def openrouter_llm_adapter(prompt: str) -> str:
                 "max_tokens": 1024,
                 "temperature": 0.1, # Low temperature for reasoning tasks
             })
->>>>>>> origin/main
         )
         
         if response.status_code != 200:

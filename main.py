@@ -35,14 +35,7 @@ def run_tutor_demo():
 
     # 1. Input Problem (GSM8K Style)
     problem_text = "Jan has 3 apples. She buys 5 more apples. How many apples does Jan have now?"
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> origin/main
     student_answer_raw = "She has 6 apples." # Wrong answer for demo
-=======
-    student_answer_raw = "She has 2 apples." # Wrong answer for demo
->>>>>>> origin/main
     
     print(f"--- PROBLEM ---\n{problem_text}")
     print(f"--- STUDENT ANSWER ---\n{student_answer_raw}\n")
@@ -50,30 +43,13 @@ def run_tutor_demo():
     # 2. Reference Solution (Using real LLM + parser)
     print("Step 1: Generating Reference Solution...")
     solve_prompt = f"Solve this math problem and provide the numeric answer at the end preceded by '#### '.\n\nProblem: {problem_text}"
-<<<<<<< HEAD
-    raw_solve = hf_llm_adapter(solve_prompt)
-<<<<<<< HEAD
-=======
-=======
     raw_solve = openrouter_llm_adapter(solve_prompt)
->>>>>>> origin/main
->>>>>>> origin/main
 
     solver_response = SolverResponse(
         raw_text=raw_solve,
         status=SolverStatus.SUCCESS,
-<<<<<<< HEAD
         model_name="Qwen/Qwen2.5-Math-7B-Instruct",
         latency_ms=0.0,
-=======
-<<<<<<< HEAD
-        model_name="Qwen/Qwen2.5-Math-7B-Instruct",
-        latency_ms=0.0,
-=======
-        model_name="Qwen/Qwen2.5-7B-Instruct",
-        latency_ms=5000.0,
->>>>>>> origin/main
->>>>>>> origin/main
         attempt_count=1,
     )
     parse_result = parse_solver_response(solver_response)
@@ -113,19 +89,9 @@ def run_tutor_demo():
         reference_answer=ref_sol.final_answer,
         student_raw=student_answer_raw,
         check_result=check_res,
-<<<<<<< HEAD
-        llm_callable=hf_llm_adapter,
+        llm_callable=openrouter_llm_adapter,
         symbolic_state=symbolic_state,
         verification_result=verification_result,
-=======
-<<<<<<< HEAD
-        llm_callable=hf_llm_adapter,
-        symbolic_state=symbolic_state,
-        verification_result=verification_result,
-=======
-        llm_callable=openrouter_llm_adapter
->>>>>>> origin/main
->>>>>>> origin/main
     )
     print(f"Error Label: {diag_res.label.value}")
     print(f"Explanation: {diag_res.explanation}\n")
