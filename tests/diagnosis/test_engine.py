@@ -2,12 +2,14 @@ import pytest
 from src.models import (
     AnswerCheckResult, Correctness, DiagnosisLabel,
     ErrorLocalization, DiagnosisResult,
+    VerificationResult, VerificationStatus,
 )
 from src.diagnosis.engine import (
     diagnose,
     diagnose_with_rules,
     parse_diagnosis_response,
     build_diagnosis_prompt,
+    diagnose_with_symbolic_evidence,
 )
 
 
@@ -105,3 +107,52 @@ class TestDiagnose:
         assert "What is 5+3?" in prompt
         assert "5+3=8" in prompt
         assert "10" in prompt
+
+
+class TestDiagnoseWithSymbolicEvidence:
+    def test_conflict_maps_to_quantity_relation_error(self):
+        check = _check(Correctness.INCORRECT, 6.0)
+        vr = VerificationResult(
+            status=VerificationStatus.CONFLICT,
+            predicted_label=DiagnosisLabel.QUANTITY_RELATION_ERROR,
+            localization_hint=ErrorLocalization.INTERMEDIATE_STEP,
+            confidence=0.92,
+            explanation="conflict",
+        )
+        result = diagnose_with_symbolic_evidence(check, vr)
+        assert result is not None
+        assert result.label == DiagnosisLabel.QUANTITY_RELATION_ERROR
+
+    def test_verified_maps_to_arithmetic_error(self):
+        check = _check(Correctness.INCORRECT, 15.0)
+        vr = VerificationResult(
+            status=VerificationStatus.VERIFIED,
+            confidence=0.7,
+            explanation="consistent",
+        )
+        result = diagnose_with_symbolic_evidence(check, vr)
+        assert result is not None
+        assert result.label == DiagnosisLabel.ARITHMETIC_ERROR
+
+
+class TestPromptWithSymbolicEvidence:
+    def test_prompt_contains_symbolic_section(self):
+        check = _check(Correctness.INCORRECT, 10.0)
+        vr = VerificationResult(
+            status=VerificationStatus.CONFLICT,
+            predicted_label=DiagnosisLabel.QUANTITY_RELATION_ERROR,
+            localization_hint=ErrorLocalization.INTERMEDIATE_STEP,
+            confidence=0.9,
+            evidence_flags=["flag_a"],
+            explanation="x",
+        )
+        prompt = build_diagnosis_prompt(
+            "What is 5+3?",
+            "5+3=8",
+            8.0,
+            "10",
+            check,
+            verification_result=vr,
+        )
+        assert "Symbolic Evidence" in prompt
+        assert "status=conflict" in prompt

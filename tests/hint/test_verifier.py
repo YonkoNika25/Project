@@ -1,5 +1,7 @@
 import pytest
-from src.hint.verifier import verify_hint_no_spoiler
+from src.models import DiagnosisLabel, HintLevel
+from src.hint.verifier import verify_hint_no_spoiler, verify_hint_alignment
+
 
 class TestVerifyHintNoSpoiler:
     def test_clean_hint(self):
@@ -19,16 +21,13 @@ class TestVerifyHintNoSpoiler:
         assert verify_hint_no_spoiler(hint, 1234.0) is False
 
     def test_numeric_equivalence_spoiler(self):
-        # Hint has 18.0 but reference is 18
         hint = "Is the result 18.0?"
         assert verify_hint_no_spoiler(hint, 18.0) is False
-        
-        # Hint has 18 but reference is 18.0
+
         hint = "Could it be 18?"
         assert verify_hint_no_spoiler(hint, 18.0) is False
 
     def test_partial_number_match_not_spoiler(self):
-        # Answer is 8, hint mentions 18. Should NOT be a spoiler.
         hint = "There are 18 students in total."
         assert verify_hint_no_spoiler(hint, 8.0) is True
 
@@ -44,3 +43,21 @@ class TestVerifyHintNoSpoiler:
         assert verify_hint_no_spoiler(hint, 8.0) is False
         assert verify_hint_no_spoiler(hint, 5.0) is False
         assert verify_hint_no_spoiler(hint, 10.0) is True
+
+
+class TestVerifyHintAlignment:
+    def test_arithmetic_alignment_pass(self):
+        hint = "Hãy kiểm tra lại phép tính ở bước cuối."
+        assert verify_hint_alignment(hint, DiagnosisLabel.ARITHMETIC_ERROR, HintLevel.NEXT_STEP) is True
+
+    def test_arithmetic_alignment_fail(self):
+        hint = "Hãy đọc lại câu hỏi xem đang hỏi đại lượng nào."
+        assert verify_hint_alignment(hint, DiagnosisLabel.ARITHMETIC_ERROR, HintLevel.NEXT_STEP) is False
+
+    def test_relational_level_requires_relational_tokens(self):
+        hint = "Hãy xem quan hệ giữa các đại lượng nên cộng hay trừ."
+        assert verify_hint_alignment(hint, DiagnosisLabel.QUANTITY_RELATION_ERROR, HintLevel.RELATIONAL) is True
+
+    def test_next_step_level_requires_action_tokens(self):
+        hint = "Quan hệ giữa các số là phép cộng."
+        assert verify_hint_alignment(hint, DiagnosisLabel.QUANTITY_RELATION_ERROR, HintLevel.NEXT_STEP) is False

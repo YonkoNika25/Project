@@ -10,6 +10,11 @@ from src.models.schemas import (
     DiagnosisLabel,
     ErrorLocalization,
     DiagnosisResult,
+    QuantityFact,
+    OperationType,
+    SymbolicState,
+    VerificationStatus,
+    VerificationResult,
     HintLevel,
     HintResult,
 )
@@ -26,6 +31,11 @@ __all__ = [
     "DiagnosisLabel",
     "ErrorLocalization",
     "DiagnosisResult",
+    "QuantityFact",
+    "OperationType",
+    "SymbolicState",
+    "VerificationStatus",
+    "VerificationResult",
     "HintLevel",
     "HintResult",
 ]

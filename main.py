@@ -1,7 +1,7 @@
 """
 Main Demo Script - End-to-End Tutoring Pipeline with Real LLM.
 
-Requires HF_TOKEN environment variable.
+Requires OPENROUTER_API_KEY environment variable.
 Usage: python main.py
 """
 import os
@@ -12,13 +12,14 @@ import sys
 sys.path.append(os.path.abspath("."))
 
 from src.models import (
-    ProblemRecord,
-    DiagnosisResult,
-    ReferenceSolution,
+    SolverResponse,
+    SolverStatus,
 )
-from src.solver.qwen_client import QwenSolverClient # Optional, we can use adapter directly
+from src.solver.reference_parser import parse_solver_response, ParseStatus
 from src.checker.answer_checker import check_answer
 from src.diagnosis.engine import diagnose
+from src.verification.symbolic_state_builder import build_symbolic_state
+from src.verification.symbolic_verifier import verify_symbolic_consistency
 from src.hint.controller import HintController
 from src.utils.llm_client import hf_llm_adapter
 
@@ -27,36 +28,41 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 def run_tutor_demo():
     # 0. Check for API Token
-    if "HF_TOKEN" not in os.environ:
-        print("ERROR: Please set the HF_TOKEN environment variable.")
-        print("Example (Windows PowerShell): $env:HF_TOKEN='your_token_here'")
+    if "OPENROUTER_API_KEY" not in os.environ:
+        print("ERROR: Please set the OPENROUTER_API_KEY environment variable.")
+        print("Example (Windows PowerShell): $env:OPENROUTER_API_KEY='your_key_here'")
         return
 
     # 1. Input Problem (GSM8K Style)
     problem_text = "Jan has 3 apples. She buys 5 more apples. How many apples does Jan have now?"
-    gold_answer = "#### 8" # GSM8K format
     student_answer_raw = "She has 6 apples." # Wrong answer for demo
     
     print(f"--- PROBLEM ---\n{problem_text}")
     print(f"--- STUDENT ANSWER ---\n{student_answer_raw}\n")
 
-    # 2. Reference Solution (Using real LLM)
+    # 2. Reference Solution (Using real LLM + parser)
     print("Step 1: Generating Reference Solution...")
-    # For a simple demo, we can simulate the ReferenceSolution object 
-    # OR use the hf_llm_adapter to actually solve it.
-    # Let's use the adapter to keep it simple but "real".
     solve_prompt = f"Solve this math problem and provide the numeric answer at the end preceded by '#### '.\n\nProblem: {problem_text}"
     raw_solve = hf_llm_adapter(solve_prompt)
-    
-    # Normally we'd use solver/reference_parser, but let's mock the struct for now
-    # to ensure the pipeline continues even if parser is sensitive to text formats
-    ref_sol = ReferenceSolution(
-        final_answer=8.0, 
-        solution_text=raw_solve,
-        confidence=1.0,
-        schema_version="1.0",
-        source="qwen-hf"
+
+    solver_response = SolverResponse(
+        raw_text=raw_solve,
+        status=SolverStatus.SUCCESS,
+        model_name="Qwen/Qwen2.5-Math-7B-Instruct",
+        latency_ms=0.0,
+        attempt_count=1,
     )
+    parse_result = parse_solver_response(solver_response)
+    if parse_result.status != ParseStatus.SUCCESS or parse_result.reference is None:
+        print("ERROR: Failed to parse reference answer from solver output.")
+        print(f"Parse status: {parse_result.status.value}")
+        print(f"Details: {parse_result.error_message}")
+        print("Raw solver output:")
+        print(raw_solve)
+        return
+
+    ref_sol = parse_result.reference
+    print(f"Parser status: {parse_result.status.value}")
     print(f"Reference Answer: {ref_sol.final_answer}\n")
 
     # 3. Answer Checking
@@ -69,22 +75,29 @@ def run_tutor_demo():
         print("Student is correct! No hint needed.")
         return
 
-    # 4. Diagnosis (Using real LLM)
-    print("Step 3: Diagnosing Student Error...")
-    # Note: diagnose() takes llm_callable as a kwarg
+    # 4. Build Phase 2 symbolic evidence
+    print("Step 3: Building Symbolic Evidence...")
+    symbolic_state = build_symbolic_state(problem_text, ref_sol.solution_text)
+    verification_result = verify_symbolic_consistency(symbolic_state, check_res)
+    print(f"Verifier status: {verification_result.status.value}")
+
+    # 5. Diagnosis (rule + symbolic evidence + LLM fallback)
+    print("Step 4: Diagnosing Student Error...")
     diag_res = diagnose(
         problem_text=problem_text,
         reference_solution_text=ref_sol.solution_text,
         reference_answer=ref_sol.final_answer,
         student_raw=student_answer_raw,
         check_result=check_res,
-        llm_callable=hf_llm_adapter
+        llm_callable=hf_llm_adapter,
+        symbolic_state=symbolic_state,
+        verification_result=verification_result,
     )
     print(f"Error Label: {diag_res.label.value}")
     print(f"Explanation: {diag_res.explanation}\n")
 
-    # 5. Hint Generation (Using real LLM)
-    print("Step 4: Generating Pedagogical Hint...")
+    # 6. Hint Generation (Using real LLM)
+    print("Step 5: Generating Pedagogical Hint...")
     # HintController coordinates generation, verification, and fallback
     hint_controller = HintController(llm_callable=hf_llm_adapter)
     hint_res = hint_controller.get_hint(

@@ -1,7 +1,7 @@
-"""Baseline prompt-based diagnosis engine.
+"""Baseline + Phase 2 diagnosis engine.
 
-Analyzes the problem, student answer, answer-check result, and reference solution
-to assign a structured DiagnosisResult using the predefined taxonomy.
+Phase 2 enhancement:
+- Supports optional symbolic evidence (`SymbolicState`, `VerificationResult`) before LLM fallback.
 """
 import json
 import logging
@@ -14,6 +14,9 @@ from src.models import (
     ErrorLocalization,
     AnswerCheckResult,
     Correctness,
+    SymbolicState,
+    VerificationResult,
+    VerificationStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,9 @@ Reference Answer: {reference_answer}
 Raw: {student_raw}
 Normalized Value: {student_value}
 Correctness: {correctness}
+
+## Symbolic Evidence (if available)
+{symbolic_evidence}
 
 ## Task
 Classify the student's error into exactly ONE of these categories:
@@ -58,8 +64,23 @@ def build_diagnosis_prompt(
     reference_answer: float,
     student_raw: str,
     check_result: AnswerCheckResult,
+    symbolic_state: Optional[SymbolicState] = None,
+    verification_result: Optional[VerificationResult] = None,
 ) -> str:
     """Build the diagnosis prompt with all context."""
+    symbolic_lines = []
+    if symbolic_state is not None:
+        symbolic_lines.append(
+            f"state: op={symbolic_state.expected_operation.value}, quantities={len(symbolic_state.quantities)}, "
+            f"builder_conf={symbolic_state.builder_confidence:.2f}"
+        )
+    if verification_result is not None:
+        symbolic_lines.append(
+            f"verify: status={verification_result.status.value}, predicted_label={verification_result.predicted_label}, "
+            f"flags={verification_result.evidence_flags}, conf={verification_result.confidence:.2f}"
+        )
+    symbolic_evidence = "\n".join(symbolic_lines) if symbolic_lines else "none"
+
     return DIAGNOSIS_PROMPT_TEMPLATE.format(
         problem=problem_text,
         reference_solution=reference_solution_text,
@@ -67,6 +88,7 @@ def build_diagnosis_prompt(
         student_raw=student_raw,
         student_value=check_result.student_value,
         correctness=check_result.correctness.value,
+        symbolic_evidence=symbolic_evidence,
     )
 
 
@@ -76,25 +98,21 @@ def parse_diagnosis_response(raw_response: str) -> DiagnosisResult:
     Falls back to UnknownError if parsing fails.
     """
     try:
-        # Try to extract JSON from the response
         json_match = re.search(r'\{[^{}]+\}', raw_response, re.DOTALL)
         if not json_match:
             raise ValueError("No JSON object found in response")
 
         data = json.loads(json_match.group())
-
         label_str = data.get("label", "unknown_error")
         loc_str = data.get("localization", "unknown")
         explanation = data.get("explanation", "No explanation provided")
 
-        # Validate label
         try:
             label = DiagnosisLabel(label_str)
         except ValueError:
             logger.warning("Invalid label '%s', falling back to unknown_error", label_str)
             label = DiagnosisLabel.UNKNOWN_ERROR
 
-        # Validate localization
         try:
             localization = ErrorLocalization(loc_str)
         except ValueError:
@@ -120,11 +138,8 @@ def parse_diagnosis_response(raw_response: str) -> DiagnosisResult:
         )
 
 
-def diagnose_with_rules(check_result: AnswerCheckResult) -> DiagnosisResult:
-    """Simple rule-based diagnosis for cases that don't need LLM.
-
-    Used for correct answers and unparseable inputs.
-    """
+def diagnose_with_rules(check_result: AnswerCheckResult) -> Optional[DiagnosisResult]:
+    """Simple rule-based diagnosis for cases that don't need LLM."""
     if check_result.correctness == Correctness.CORRECT:
         return DiagnosisResult(
             label=DiagnosisLabel.CORRECT_ANSWER,
@@ -141,7 +156,35 @@ def diagnose_with_rules(check_result: AnswerCheckResult) -> DiagnosisResult:
             confidence=1.0,
         )
 
-    # For incorrect answers, we need the LLM — return None to signal this
+    return None
+
+
+def diagnose_with_symbolic_evidence(
+    check_result: AnswerCheckResult,
+    verification_result: Optional[VerificationResult],
+) -> Optional[DiagnosisResult]:
+    """Phase 2: use symbolic verification as grounded diagnosis evidence."""
+    if check_result.correctness != Correctness.INCORRECT or verification_result is None:
+        return None
+
+    if verification_result.status == VerificationStatus.CONFLICT and verification_result.predicted_label:
+        return DiagnosisResult(
+            label=verification_result.predicted_label,
+            localization=verification_result.localization_hint,
+            explanation=f"Grounded by verifier: {verification_result.explanation}",
+            confidence=max(verification_result.confidence, 0.75),
+            fallback_used=False,
+        )
+
+    if verification_result.status == VerificationStatus.VERIFIED:
+        return DiagnosisResult(
+            label=DiagnosisLabel.ARITHMETIC_ERROR,
+            localization=ErrorLocalization.FINAL_COMPUTATION,
+            explanation="Symbolic evidence suggests operation understanding is consistent; likely arithmetic slip.",
+            confidence=max(verification_result.confidence, 0.65),
+            fallback_used=False,
+        )
+
     return None
 
 
@@ -152,27 +195,21 @@ def diagnose(
     student_raw: str,
     check_result: AnswerCheckResult,
     llm_callable=None,
+    symbolic_state: Optional[SymbolicState] = None,
+    verification_result: Optional[VerificationResult] = None,
 ) -> DiagnosisResult:
-    """Full diagnosis pipeline: rule-based first, then LLM if needed.
-
-    Args:
-        problem_text: The math problem.
-        reference_solution_text: Full reference solution text.
-        reference_answer: Normalized reference answer.
-        student_raw: Raw student answer text.
-        check_result: Result of answer checking.
-        llm_callable: Optional callable(prompt) -> str for LLM diagnosis.
-                      If None and LLM is needed, falls back to UnknownError.
-
-    Returns:
-        DiagnosisResult with taxonomy label.
-    """
-    # Try rule-based first
+    """Full diagnosis pipeline: rule-based, symbolic-evidence, then LLM."""
     rule_result = diagnose_with_rules(check_result)
     if rule_result is not None:
         return rule_result
 
-    # Need LLM for incorrect answers
+    symbolic_result = diagnose_with_symbolic_evidence(
+        check_result=check_result,
+        verification_result=verification_result,
+    )
+    if symbolic_result is not None:
+        return symbolic_result
+
     if llm_callable is None:
         return DiagnosisResult(
             label=DiagnosisLabel.UNKNOWN_ERROR,
@@ -188,6 +225,8 @@ def diagnose(
         reference_answer=reference_answer,
         student_raw=student_raw,
         check_result=check_result,
+        symbolic_state=symbolic_state,
+        verification_result=verification_result,
     )
 
     try:
