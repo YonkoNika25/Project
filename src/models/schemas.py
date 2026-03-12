@@ -51,6 +51,8 @@ class SolverConfig(BaseModel):
     """Configuration for the Qwen solver client."""
     model_name: str = Field(default="Qwen/Qwen2.5-Math-7B-Instruct", description="Model identifier")
     api_base: str = Field(default="http://localhost:8000/v1", description="OpenAI-compatible API base URL")
+    api_key: Optional[str] = Field(default=None, description="Optional bearer token for API authentication")
+    extra_headers: Dict[str, str] = Field(default_factory=dict, description="Optional additional HTTP headers")
     timeout_seconds: float = Field(default=60.0, gt=0, description="Request timeout in seconds")
     max_retries: int = Field(default=3, ge=0, le=10, description="Maximum retry attempts")
     temperature: float = Field(default=0.0, ge=0.0, le=2.0, description="Sampling temperature")

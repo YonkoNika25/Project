@@ -1,4 +1,4 @@
-"""End-to-end hint controller: orchestrates generation, verification, and fallback."""
+﻿"""End-to-end hint controller: orchestrates generation, verification, and fallback."""
 import logging
 from typing import Optional
 
@@ -71,7 +71,7 @@ class HintController:
         if diagnosis.label == DiagnosisLabel.CORRECT_ANSWER:
             return HintResult(
                 hint_level=HintLevel.CONCEPTUAL,
-                hint_text="Đáp án của em hoàn toàn chính xác! Làm tốt lắm.",
+                hint_text="Your answer is completely correct. Great work!",
                 generated_status="success",
                 diagnosis_label_used=diagnosis.label,
                 fallback_used=False,

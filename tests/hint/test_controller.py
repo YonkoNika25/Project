@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from src.models import (
     HintLevel,
     DiagnosisLabel,
@@ -25,36 +25,36 @@ class TestHintController:
         diag = _diag(DiagnosisLabel.CORRECT_ANSWER)
         result = controller.get_hint("P", "S", 10.0, "10", diag)
 
-        assert "chính xác" in result.hint_text
+        assert "correct" in result.hint_text.lower()
         assert result.fallback_used is False
         assert result.generated_status == "success"
 
     def test_successful_generation(self):
         def mock_llm(prompt):
-            return '{"hint_text": "Hãy kiểm tra lại phép tính cộng ở bước tiếp theo."}'
+            return '{"hint_text": "Try checking the addition calculation in the next step."}'
 
         controller = HintController(llm_callable=mock_llm)
         diag = _diag(DiagnosisLabel.ARITHMETIC_ERROR)
         result = controller.get_hint("5+5", "10", 10.0, "11", diag)
 
-        assert "phép tính" in result.hint_text
+        assert "calculation" in result.hint_text
         assert result.fallback_used is False
         assert result.generated_status == "success"
 
     def test_spoiler_triggers_fallback(self):
         def mock_llm_spoiler(prompt):
-            return '{"hint_text": "Đáp án là 10 nhé."}'
+            return '{"hint_text": "The answer is 10."}'
 
         controller = HintController(llm_callable=mock_llm_spoiler, max_retries=0)
         diag = _diag(DiagnosisLabel.ARITHMETIC_ERROR)
         result = controller.get_hint("5+5", "10", 10.0, "11", diag)
 
         assert result.fallback_used is True
-        assert "tính toán" in result.hint_text
+        assert "calculation" in result.hint_text.lower()
 
     def test_alignment_failure_triggers_fallback(self):
         def mock_llm_misaligned(prompt):
-            return '{"hint_text": "Hãy đọc lại câu hỏi xem đề hỏi gì.", "hint_level": "next_step"}'
+            return '{"hint_text": "Read the question again to see what is being asked.", "hint_level": "next_step"}'
 
         controller = HintController(llm_callable=mock_llm_misaligned, max_retries=0)
         diag = _diag(DiagnosisLabel.ARITHMETIC_ERROR)
@@ -71,7 +71,7 @@ class TestHintController:
         result = controller.get_hint("P", "S", 10.0, "W", diag)
 
         assert result.fallback_used is True
-        assert "câu hỏi" in result.hint_text
+        assert "question" in result.hint_text.lower()
 
     def test_retry_then_success(self):
         call_count = 0
@@ -80,14 +80,14 @@ class TestHintController:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return '{"hint_text": "Đáp án là 10."}'
-            return '{"hint_text": "Hãy thử cộng lại ở bước tiếp theo."}'
+                return '{"hint_text": "The answer is 10."}'
+            return '{"hint_text": "Try adding again in the next step."}'
 
         controller = HintController(llm_callable=retry_mock, max_retries=1)
         diag = _diag(DiagnosisLabel.ARITHMETIC_ERROR)
         result = controller.get_hint("5+5", "10", 10.0, "11", diag)
 
-        assert "cộng lại" in result.hint_text
+        assert "adding again" in result.hint_text.lower()
         assert result.fallback_used is False
         assert call_count == 2
 
@@ -96,7 +96,7 @@ class TestHintController:
 
         def mock_llm(prompt):
             prompts.append(prompt)
-            return '{"hint_text": "Hãy xem quan hệ giữa các đại lượng nên cộng hay trừ.", "hint_level": "relational"}'
+            return '{"hint_text": "Check the relationship between quantities before choosing add or subtract.", "hint_level": "relational"}'
 
         controller = HintController(llm_callable=mock_llm, max_retries=0)
         diag = _diag(DiagnosisLabel.QUANTITY_RELATION_ERROR)

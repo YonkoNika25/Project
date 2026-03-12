@@ -11,8 +11,9 @@ from src.checker.answer_checker import check_answer
 from src.dataset.gsm8k_loader import load_gsm8k_from_huggingface
 from src.diagnosis.engine import diagnose
 from src.hint.controller import HintController
-from src.models import SolverResponse, SolverStatus, DiagnosisLabel
+from src.models import DiagnosisLabel
 from src.solver.reference_parser import parse_solver_response, ParseStatus
+from src.solver.qwen_client import QwenSolverClient, build_solver_config_from_env
 from src.utils.llm_client import openrouter_llm_adapter
 from src.verification.symbolic_state_builder import build_symbolic_state
 from src.verification.symbolic_verifier import verify_symbolic_consistency
@@ -23,8 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def evaluate(split: str, limit: int) -> None:
-    records, report = load_gsm8k_from_huggingface(split=split)
-    records = records[:limit]
+    records, report = load_gsm8k_from_huggingface(split=split, max_records=limit)
 
     parse_success = 0
     reference_correct = 0
@@ -34,69 +34,62 @@ def evaluate(split: str, limit: int) -> None:
     verification_counter: Counter[str] = Counter()
 
     hint_controller = HintController(llm_callable=openrouter_llm_adapter)
+    solver_client = QwenSolverClient(config=build_solver_config_from_env())
 
-    for idx, rec in enumerate(records, start=1):
-        solve_prompt = (
-            "Solve this math problem step by step and end with '#### <answer>'.\n\n"
-            f"Problem: {rec.problem}"
-        )
-        raw_solve = openrouter_llm_adapter(solve_prompt)
+    try:
+        for idx, rec in enumerate(records, start=1):
+            solver_response = solver_client.solve(rec.problem)
+            parse_result = parse_solver_response(solver_response)
 
-        solver_response = SolverResponse(
-            raw_text=raw_solve,
-            status=SolverStatus.SUCCESS,
-            model_name="Qwen/Qwen2.5-Math-7B-Instruct",
-            latency_ms=0.0,
-            attempt_count=1,
-        )
-        parse_result = parse_solver_response(solver_response)
+            if parse_result.status != ParseStatus.SUCCESS or parse_result.reference is None:
+                diagnosis_counter[DiagnosisLabel.UNKNOWN_ERROR.value] += 1
+                logger.warning("[%d/%d] parse failed: %s", idx, len(records), parse_result.status.value)
+                logger.warning("RAW OUTPUT:\n%s\n---", solver_response.raw_text or solver_response.error_message)
+                continue
 
-        if parse_result.status != ParseStatus.SUCCESS or parse_result.reference is None:
-            diagnosis_counter[DiagnosisLabel.UNKNOWN_ERROR.value] += 1
-            logger.warning("[%d/%d] parse failed: %s", idx, len(records), parse_result.status.value)
-            logger.warning("RAW OUTPUT:\n%s\n---", raw_solve)
-            continue
+            parse_success += 1
+            ref_sol = parse_result.reference
+            if abs(ref_sol.final_answer - rec.gold_answer_value) < 1e-9:
+                reference_correct += 1
 
-        parse_success += 1
-        ref_sol = parse_result.reference
-        if abs(ref_sol.final_answer - rec.gold_answer_value) < 1e-9:
-            reference_correct += 1
+            # Synthetic student answer to exercise diagnosis + hint pipeline
+            student_answer = f"I think the answer is {ref_sol.final_answer - 1}."
+            check_res = check_answer(student_answer, ref_sol.final_answer)
+            symbolic_state = build_symbolic_state(rec.problem, ref_sol.solution_text)
+            verification_result = verify_symbolic_consistency(symbolic_state, check_res)
+            verification_counter[verification_result.status.value] += 1
 
-        # Synthetic student answer to exercise diagnosis + hint pipeline
-        student_answer = f"I think the answer is {ref_sol.final_answer - 1}."
-        check_res = check_answer(student_answer, ref_sol.final_answer)
-        symbolic_state = build_symbolic_state(rec.problem, ref_sol.solution_text)
-        verification_result = verify_symbolic_consistency(symbolic_state, check_res)
-        verification_counter[verification_result.status.value] += 1
+            diag_res = diagnose(
+                problem_text=rec.problem,
+                reference_solution_text=ref_sol.solution_text,
+                reference_answer=ref_sol.final_answer,
+                student_raw=student_answer,
+                check_result=check_res,
+                llm_callable=openrouter_llm_adapter,
+                symbolic_state=symbolic_state,
+                verification_result=verification_result,
+            )
+            diagnosis_counter[diag_res.label.value] += 1
 
-        diag_res = diagnose(
-            problem_text=rec.problem,
-            reference_solution_text=ref_sol.solution_text,
-            reference_answer=ref_sol.final_answer,
-            student_raw=student_answer,
-            check_result=check_res,
-            llm_callable=openrouter_llm_adapter,
-            symbolic_state=symbolic_state,
-            verification_result=verification_result,
-        )
-        diagnosis_counter[diag_res.label.value] += 1
+            hint_res = hint_controller.get_hint(
+                problem_text=rec.problem,
+                reference_solution_text=ref_sol.solution_text,
+                reference_answer=ref_sol.final_answer,
+                student_raw=student_answer,
+                diagnosis=diag_res,
+                verification_result=verification_result,
+            )
+            if not hint_res.fallback_used:
+                spoiler_free += 1
 
-        hint_res = hint_controller.get_hint(
-            problem_text=rec.problem,
-            reference_solution_text=ref_sol.solution_text,
-            reference_answer=ref_sol.final_answer,
-            student_raw=student_answer,
-            diagnosis=diag_res,
-        )
-        if not hint_res.fallback_used:
-            spoiler_free += 1
-
-        if verify_hint_alignment(
-            hint_res.hint_text,
-            diagnosis_label=diag_res.label,
-            expected_level=hint_res.hint_level,
-        ):
-            hint_alignment_ok += 1
+            if verify_hint_alignment(
+                hint_res.hint_text,
+                diagnosis_label=diag_res.label,
+                expected_level=hint_res.hint_level,
+            ):
+                hint_alignment_ok += 1
+    finally:
+        solver_client.close()
 
     total = len(records)
     print("\n=== Evaluation Summary ===")

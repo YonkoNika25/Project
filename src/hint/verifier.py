@@ -1,4 +1,4 @@
-"""Hint verification utilities for spoiler and pedagogical alignment checks."""
+﻿"""Hint verification utilities for spoiler and pedagogical alignment checks."""
 import re
 import logging
 from typing import Optional
@@ -53,10 +53,10 @@ def verify_hint_alignment(
     lower = hint_text.lower()
 
     label_keywords = {
-        DiagnosisLabel.ARITHMETIC_ERROR: ["tính", "calculation", "compute", "phép", "bước"],
-        DiagnosisLabel.QUANTITY_RELATION_ERROR: ["quan hệ", "relationship", "cộng", "trừ", "add", "subtract", "total"],
-        DiagnosisLabel.TARGET_MISUNDERSTANDING: ["câu hỏi", "yêu cầu", "target", "asked", "what"],
-        DiagnosisLabel.UNPARSEABLE_ANSWER: ["viết lại", "trình bày", "clarify", "clear", "explain"],
+        DiagnosisLabel.ARITHMETIC_ERROR: ["calculation", "compute", "arithmetic", "step"],
+        DiagnosisLabel.QUANTITY_RELATION_ERROR: ["relationship", "between", "add", "subtract", "total"],
+        DiagnosisLabel.TARGET_MISUNDERSTANDING: ["question", "asked", "target", "find", "value"],
+        DiagnosisLabel.UNPARSEABLE_ANSWER: ["rewrite", "clear", "clarify", "format", "explain"],
     }
 
     if diagnosis_label in label_keywords:
@@ -65,13 +65,13 @@ def verify_hint_alignment(
             return False
 
     if expected_level == HintLevel.RELATIONAL:
-        relational_tokens = ["quan hệ", "relationship", "between", "giữa", "cộng", "trừ", "add", "subtract"]
+        relational_tokens = ["relationship", "between", "add", "subtract", "compare"]
         if not any(tok in lower for tok in relational_tokens):
             logger.warning("Hint failed relational-level alignment")
             return False
 
     if expected_level == HintLevel.NEXT_STEP:
-        action_tokens = ["hãy", "try", "next", "bước", "step"]
+        action_tokens = ["try", "next", "step", "then", "first"]
         if not any(tok in lower for tok in action_tokens):
             logger.warning("Hint failed next-step alignment")
             return False

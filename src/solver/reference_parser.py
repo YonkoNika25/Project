@@ -44,6 +44,13 @@ def parse_solver_response(
         )
 
     raw_text = solver_response.raw_text
+    normalized = raw_text.strip()
+    if normalized.startswith("Error calling LLM:") or normalized.startswith("Error: OPENROUTER_API_KEY is missing."):
+        return ParseResult(
+            status=ParseStatus.SOLVER_FAILED,
+            error_message=normalized,
+        )
+
     gold_value, parsed_ok = parse_gsm8k_answer(raw_text)
 
     if not parsed_ok or gold_value is None:

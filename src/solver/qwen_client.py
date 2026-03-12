@@ -1,5 +1,6 @@
 """Qwen solver client: sends problems to a Qwen2.5-Math API and handles retries."""
 import logging
+import os
 import time
 import httpx
 from typing import Optional
@@ -25,9 +26,15 @@ class QwenSolverClient:
     @property
     def http_client(self) -> httpx.Client:
         if self._http_client is None:
+            headers = {"Content-Type": "application/json"}
+            if self.config.api_key:
+                headers["Authorization"] = f"Bearer {self.config.api_key}"
+            headers.update(self.config.extra_headers)
+
             self._http_client = httpx.Client(
                 base_url=self.config.api_base,
                 timeout=self.config.timeout_seconds,
+                headers=headers,
             )
         return self._http_client
 
@@ -114,3 +121,22 @@ class QwenSolverClient:
         """Exponential backoff: 1s, 2s, 4s, ..."""
         delay = min(2 ** (attempt - 1), 8)
         time.sleep(delay)
+
+
+def build_solver_config_from_env() -> SolverConfig:
+    """Build a SolverConfig using OpenRouter-oriented environment variables."""
+    extra_headers = {}
+    referer = os.environ.get("OPENROUTER_HTTP_REFERER")
+    app_name = os.environ.get("OPENROUTER_APP_NAME")
+    if referer:
+        extra_headers["HTTP-Referer"] = referer
+    if app_name:
+        extra_headers["X-Title"] = app_name
+
+    return SolverConfig(
+        model_name=os.environ.get("OPENROUTER_MODEL_ID", "qwen/qwen-2.5-7b-instruct"),
+        api_base=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+        api_key=os.environ.get("OPENROUTER_API_KEY"),
+        timeout_seconds=float(os.environ.get("OPENROUTER_TIMEOUT_SECONDS", "30")),
+        extra_headers=extra_headers,
+    )

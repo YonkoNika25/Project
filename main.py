@@ -11,11 +11,8 @@ import sys
 # Ensure src is in path
 sys.path.append(os.path.abspath("."))
 
-from src.models import (
-    SolverResponse,
-    SolverStatus,
-)
 from src.solver.reference_parser import parse_solver_response, ParseStatus
+from src.solver.qwen_client import QwenSolverClient, build_solver_config_from_env
 from src.checker.answer_checker import check_answer
 from src.diagnosis.engine import diagnose
 from src.verification.symbolic_state_builder import build_symbolic_state
@@ -25,6 +22,11 @@ from src.utils.llm_client import openrouter_llm_adapter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+try:
+    # Prevent UnicodeEncodeError on Windows terminals when hints contain Vietnamese text.
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 def run_tutor_demo():
     # 0. Check for API Token
@@ -34,31 +36,27 @@ def run_tutor_demo():
         return
 
     # 1. Input Problem (GSM8K Style)
-    problem_text = "Jan has 3 apples. She buys 5 more apples. How many apples does Jan have now?"
-    student_answer_raw = "She has 6 apples." # Wrong answer for demo
+    problem_text = "Jan has 3 apples. She buys 10 more apples. How many apples does Jan have now?"
+    student_answer_raw = "She has 20 apples." # Wrong answer for demo
     
     print(f"--- PROBLEM ---\n{problem_text}")
     print(f"--- STUDENT ANSWER ---\n{student_answer_raw}\n")
 
     # 2. Reference Solution (Using real LLM + parser)
     print("Step 1: Generating Reference Solution...")
-    solve_prompt = f"Solve this math problem and provide the numeric answer at the end preceded by '#### '.\n\nProblem: {problem_text}"
-    raw_solve = openrouter_llm_adapter(solve_prompt)
+    solver_client = QwenSolverClient(config=build_solver_config_from_env())
+    try:
+        solver_response = solver_client.solve(problem_text)
+    finally:
+        solver_client.close()
 
-    solver_response = SolverResponse(
-        raw_text=raw_solve,
-        status=SolverStatus.SUCCESS,
-        model_name="Qwen/Qwen2.5-Math-7B-Instruct",
-        latency_ms=0.0,
-        attempt_count=1,
-    )
     parse_result = parse_solver_response(solver_response)
     if parse_result.status != ParseStatus.SUCCESS or parse_result.reference is None:
         print("ERROR: Failed to parse reference answer from solver output.")
         print(f"Parse status: {parse_result.status.value}")
         print(f"Details: {parse_result.error_message}")
         print("Raw solver output:")
-        print(raw_solve)
+        print(solver_response.raw_text or solver_response.error_message)
         return
 
     ref_sol = parse_result.reference

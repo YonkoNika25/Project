@@ -1,7 +1,7 @@
 """GSM8K dataset loader: loads and normalises raw GSM8K data into ProblemRecord schemas."""
 import logging
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from src.models import ProblemRecord
 from src.dataset.answer_parser import parse_gsm8k_answer
@@ -93,6 +93,7 @@ def load_gsm8k_from_records(
 
 def load_gsm8k_from_huggingface(
     split: str = "train",
+    max_records: Optional[int] = None,
 ) -> tuple[List[ProblemRecord], LoadReport]:
     """Load GSM8K directly from HuggingFace datasets library.
 
@@ -113,5 +114,7 @@ def load_gsm8k_from_huggingface(
         )
 
     ds = load_dataset("openai/gsm8k", "main", split=split)
+    if max_records is not None and max_records >= 0:
+        ds = ds.select(range(min(max_records, len(ds))))
     raw_records = [{"question": r["question"], "answer": r["answer"]} for r in ds]
     return load_gsm8k_from_records(raw_records, split=split)

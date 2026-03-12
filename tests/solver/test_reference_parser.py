@@ -66,6 +66,14 @@ class TestParseSolverResponse:
         result = parse_solver_response(resp)
         assert result.status == ParseStatus.SOLVER_FAILED
 
+    def test_success_status_but_error_text(self):
+        resp = _make_solver_response(
+            raw_text="Error calling LLM: [WinError 10013] socket blocked"
+        )
+        result = parse_solver_response(resp)
+        assert result.status == ParseStatus.SOLVER_FAILED
+        assert result.reference is None
+
     def test_reference_conforms_to_schema(self):
         resp = _make_solver_response("Work: 7*6=42\n#### 42")
         result = parse_solver_response(resp)

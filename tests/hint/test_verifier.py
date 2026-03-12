@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from src.models import DiagnosisLabel, HintLevel
 from src.hint.verifier import verify_hint_no_spoiler, verify_hint_alignment
 
@@ -47,17 +47,17 @@ class TestVerifyHintNoSpoiler:
 
 class TestVerifyHintAlignment:
     def test_arithmetic_alignment_pass(self):
-        hint = "Hãy kiểm tra lại phép tính ở bước cuối."
+        hint = "Try checking the calculation at the final step."
         assert verify_hint_alignment(hint, DiagnosisLabel.ARITHMETIC_ERROR, HintLevel.NEXT_STEP) is True
 
     def test_arithmetic_alignment_fail(self):
-        hint = "Hãy đọc lại câu hỏi xem đang hỏi đại lượng nào."
+        hint = "Read the question again and identify the target quantity."
         assert verify_hint_alignment(hint, DiagnosisLabel.ARITHMETIC_ERROR, HintLevel.NEXT_STEP) is False
 
     def test_relational_level_requires_relational_tokens(self):
-        hint = "Hãy xem quan hệ giữa các đại lượng nên cộng hay trừ."
+        hint = "Check the relationship between quantities before deciding whether to add or subtract."
         assert verify_hint_alignment(hint, DiagnosisLabel.QUANTITY_RELATION_ERROR, HintLevel.RELATIONAL) is True
 
     def test_next_step_level_requires_action_tokens(self):
-        hint = "Quan hệ giữa các số là phép cộng."
+        hint = "The relationship between the numbers is additive."
         assert verify_hint_alignment(hint, DiagnosisLabel.QUANTITY_RELATION_ERROR, HintLevel.NEXT_STEP) is False
