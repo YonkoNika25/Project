@@ -49,6 +49,7 @@ def evaluate(split: str, limit: int) -> None:
         if parse_result.status != ParseStatus.SUCCESS or parse_result.reference is None:
             diagnosis_counter[DiagnosisLabel.UNKNOWN_ERROR.value] += 1
             logger.warning("[%d/%d] parse failed: %s", idx, len(records), parse_result.status.value)
+            logger.warning("RAW OUTPUT:\n%s\n---", raw_solve)
             continue
 
         parse_success += 1
@@ -98,7 +99,7 @@ def evaluate(split: str, limit: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run baseline evaluation on GSM8K")
     parser.add_argument("--split", default="test", choices=["train", "test"])
-    parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
     evaluate(split=args.split, limit=args.limit)
 
