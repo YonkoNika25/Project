@@ -17,6 +17,17 @@ from src.models.schemas import (
     VerificationResult,
     HintLevel,
     HintResult,
+    BenchmarkProblem,
+    GoldReferenceAnnotation,
+    StudentCase,
+    GoldDiagnosisAnnotation,
+    GoldHintAnnotation,
+    BenchmarkQuantityAnnotation,
+    SymbolicAnnotation,
+    BenchmarkMetadata,
+    BenchmarkSample,
+    AuditDecision,
+    AuditReviewRecord,
 )
 
 __all__ = [
@@ -38,4 +49,15 @@ __all__ = [
     "VerificationResult",
     "HintLevel",
     "HintResult",
+    "BenchmarkProblem",
+    "GoldReferenceAnnotation",
+    "StudentCase",
+    "GoldDiagnosisAnnotation",
+    "GoldHintAnnotation",
+    "BenchmarkQuantityAnnotation",
+    "SymbolicAnnotation",
+    "BenchmarkMetadata",
+    "BenchmarkSample",
+    "AuditDecision",
+    "AuditReviewRecord",
 ]

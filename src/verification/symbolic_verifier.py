@@ -15,6 +15,46 @@ def _approx_equal(a: float, b: float, tol: float = 1e-9) -> bool:
     return abs(a - b) <= tol
 
 
+def _find_matching_quantity(student: float, values: list[float]) -> float | None:
+    for value in values:
+        if _approx_equal(student, value):
+            return value
+    return None
+
+
+def _relation_error_candidates(
+    values: list[float],
+    expected_operation: OperationType,
+) -> list[tuple[float, str]]:
+    candidates: list[tuple[float, str]] = []
+
+    if len(values) >= 2:
+        candidates.append((values[0] - values[1], "first_subtraction_only"))
+        candidates.append((values[0] + values[1], "partial_sum_first_two"))
+        candidates.append((abs(values[0] - values[1]), "difference_of_first_two"))
+
+    if len(values) >= 3:
+        for end in range(2, len(values)):
+            candidates.append((sum(values[:end]), f"partial_sum_first_{end}"))
+        candidates.append((sum(values[1:]), "drop_initial_quantity"))
+        candidates.append((abs(max(values) - min(values)), "comparison_extremes"))
+
+    if expected_operation == OperationType.ADDITIVE:
+        candidates.append((abs(max(values) - min(values)), "comparison_instead_of_total"))
+    elif expected_operation == OperationType.SUBTRACTIVE:
+        candidates.append((sum(values), "sum_instead_of_difference"))
+
+    seen: set[float] = set()
+    deduped: list[tuple[float, str]] = []
+    for candidate, reason in candidates:
+        rounded = round(candidate, 9)
+        if rounded in seen:
+            continue
+        seen.add(rounded)
+        deduped.append((candidate, reason))
+    return deduped
+
+
 def verify_symbolic_consistency(
     state: SymbolicState,
     check_result: AnswerCheckResult,
@@ -44,6 +84,17 @@ def verify_symbolic_consistency(
     student = check_result.student_value
     reference = check_result.reference_value
 
+    matching_quantity = _find_matching_quantity(student, values)
+    if matching_quantity is not None and not _approx_equal(student, reference):
+        return VerificationResult(
+            status=VerificationStatus.CONFLICT,
+            localization_hint=ErrorLocalization.TARGET_SELECTION,
+            predicted_label=DiagnosisLabel.TARGET_MISUNDERSTANDING,
+            confidence=0.82,
+            evidence_flags=["student_matches_problem_quantity"],
+            explanation="Student answer matches a visible quantity in the problem instead of the requested target.",
+        )
+
     student_matches_add = _approx_equal(student, additive)
     student_matches_sub = _approx_equal(student, subtractive)
     ref_matches_add = _approx_equal(reference, additive)
@@ -68,6 +119,17 @@ def verify_symbolic_consistency(
             evidence_flags=["student_matches_additive_interpretation", "expected_subtractive_relation"],
             explanation="Student answer matches additive interpretation while subtractive relation is expected.",
         )
+
+    for candidate, reason in _relation_error_candidates(values, state.expected_operation):
+        if _approx_equal(student, candidate) and not _approx_equal(reference, candidate):
+            return VerificationResult(
+                status=VerificationStatus.CONFLICT,
+                localization_hint=ErrorLocalization.COMBINING_QUANTITIES,
+                predicted_label=DiagnosisLabel.QUANTITY_RELATION_ERROR,
+                confidence=0.84,
+                evidence_flags=[reason, "student_matches_intermediate_combination"],
+                explanation="Student answer matches an intermediate quantity-combination strategy instead of the final target relation.",
+            )
 
     student_prefers_add = abs(student - additive) <= abs(student - subtractive)
     reference_prefers_add = abs(reference - additive) <= abs(reference - subtractive)

@@ -3,8 +3,25 @@ from pathlib import Path
 
 import pytest
 
-from src.eval.audit_io import load_label_map, write_audit_jsonl
-from src.models import DiagnosisLabel
+from src.eval.audit_io import (
+    build_audit_review_template,
+    load_audit_review_csv,
+    load_label_map,
+    write_audit_jsonl,
+    write_audit_review_csv,
+    write_benchmark_jsonl,
+)
+from src.models import (
+    AuditDecision,
+    BenchmarkMetadata,
+    BenchmarkProblem,
+    BenchmarkSample,
+    DiagnosisLabel,
+    ErrorLocalization,
+    GoldDiagnosisAnnotation,
+    GoldReferenceAnnotation,
+    StudentCase,
+)
 
 
 def test_load_label_map_from_json_dict(tmp_path: Path):
@@ -52,3 +69,44 @@ def test_write_audit_jsonl(tmp_path: Path):
 
     content = p.read_text(encoding="utf-8").strip()
     assert json.loads(content)["problem_id"] == "q1"
+
+
+def test_write_benchmark_jsonl(tmp_path: Path):
+    p = tmp_path / "benchmark" / "rows.jsonl"
+    rows = [{"sample_id": "s1", "split": "train_build"}]
+    write_benchmark_jsonl(str(p), rows)
+
+    content = p.read_text(encoding="utf-8").strip()
+    assert json.loads(content)["sample_id"] == "s1"
+
+
+def test_build_and_load_audit_review_csv(tmp_path: Path):
+    sample = BenchmarkSample(
+        sample_id="s1",
+        split="dev_audit",
+        source_dataset="gsm8k",
+        source_problem_id="gsm8k_train_00001",
+        source_type="synthetic_draft",
+        problem=BenchmarkProblem(text="How many apples are left?"),
+        gold_reference=GoldReferenceAnnotation(final_answer=7.0, solution_text="#### 7"),
+        student_case=StudentCase(student_answer_raw="5", student_answer_value=5.0, error_generation_method="synthetic"),
+        gold_diagnosis=GoldDiagnosisAnnotation(
+            primary_label=DiagnosisLabel.TARGET_MISUNDERSTANDING,
+            localization=ErrorLocalization.TARGET_SELECTION,
+            confidence=0.8,
+            rationale="Student picked a non-target quantity.",
+        ),
+        metadata=BenchmarkMetadata(created_by="generator"),
+    )
+
+    template = build_audit_review_template([sample])
+    assert template[0].decision == AuditDecision.KEEP
+    assert template[0].updated_primary_label == DiagnosisLabel.TARGET_MISUNDERSTANDING
+
+    p = tmp_path / "audit" / "review.csv"
+    write_audit_review_csv(str(p), template)
+
+    loaded = load_audit_review_csv(str(p))
+    assert loaded[0].sample_id == "s1"
+    assert loaded[0].decision == AuditDecision.KEEP
+    assert loaded[0].updated_localization == ErrorLocalization.TARGET_SELECTION

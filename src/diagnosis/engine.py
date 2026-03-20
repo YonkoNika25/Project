@@ -14,6 +14,7 @@ from src.models import (
     ErrorLocalization,
     AnswerCheckResult,
     Correctness,
+    OperationType,
     SymbolicState,
     VerificationResult,
     VerificationStatus,
@@ -161,27 +162,70 @@ def diagnose_with_rules(check_result: AnswerCheckResult) -> Optional[DiagnosisRe
 
 def diagnose_with_symbolic_evidence(
     check_result: AnswerCheckResult,
+    symbolic_state: Optional[SymbolicState],
     verification_result: Optional[VerificationResult],
 ) -> Optional[DiagnosisResult]:
     """Phase 2: use symbolic verification as grounded diagnosis evidence."""
     if check_result.correctness != Correctness.INCORRECT or verification_result is None:
         return None
 
+    builder_confidence = symbolic_state.builder_confidence if symbolic_state is not None else 0.0
+    quantity_count = len(symbolic_state.quantities) if symbolic_state is not None else 0
+    expected_operation = symbolic_state.expected_operation if symbolic_state is not None else OperationType.UNKNOWN
+
+    symbolic_reliability = (builder_confidence * 0.55) + (verification_result.confidence * 0.45)
+    if expected_operation == OperationType.UNKNOWN:
+        symbolic_reliability -= 0.15
+    if quantity_count < 2:
+        symbolic_reliability -= 0.2
+    symbolic_reliability = max(0.0, min(1.0, symbolic_reliability))
+
+    student_value = check_result.student_value
+    reference_value = check_result.reference_value
+    near_miss_window = max(5.0, abs(reference_value) * 0.15)
+    near_miss_arithmetic = (
+        student_value is not None
+        and abs(student_value - reference_value) > 0
+        and abs(student_value - reference_value) <= near_miss_window
+        and symbolic_state is not None
+        and all(abs(student_value - fact.value) > 1e-9 for fact in symbolic_state.quantities)
+    )
+
     if verification_result.status == VerificationStatus.CONFLICT and verification_result.predicted_label:
+        strong_conflict = (
+            verification_result.confidence >= 0.8
+            and verification_result.localization_hint in {
+                ErrorLocalization.COMBINING_QUANTITIES,
+                ErrorLocalization.TARGET_SELECTION,
+            }
+        )
+        if symbolic_reliability < 0.6 and not strong_conflict:
+            return None
         return DiagnosisResult(
             label=verification_result.predicted_label,
             localization=verification_result.localization_hint,
             explanation=f"Grounded by verifier: {verification_result.explanation}",
-            confidence=max(verification_result.confidence, 0.75),
+            confidence=min(
+                max(symbolic_reliability, verification_result.confidence if strong_conflict else 0.7),
+                0.9,
+            ),
             fallback_used=False,
         )
 
     if verification_result.status == VerificationStatus.VERIFIED:
+        if symbolic_reliability < 0.62 and not near_miss_arithmetic:
+            return None
         return DiagnosisResult(
             label=DiagnosisLabel.ARITHMETIC_ERROR,
             localization=ErrorLocalization.FINAL_COMPUTATION,
-            explanation="Symbolic evidence suggests operation understanding is consistent; likely arithmetic slip.",
-            confidence=max(verification_result.confidence, 0.65),
+            explanation=(
+                "Symbolic evidence suggests operation understanding is consistent, "
+                "and the combined builder/verifier confidence passes the diagnosis guardrail."
+                if not near_miss_arithmetic else
+                "Symbolic evidence is partially weak, but the student answer is a clear near-miss rather than a target "
+                "selection or relation error."
+            ),
+            confidence=min(max(symbolic_reliability, 0.62 if near_miss_arithmetic else symbolic_reliability), 0.72),
             fallback_used=False,
         )
 
@@ -205,6 +249,7 @@ def diagnose(
 
     symbolic_result = diagnose_with_symbolic_evidence(
         check_result=check_result,
+        symbolic_state=symbolic_state,
         verification_result=verification_result,
     )
     if symbolic_result is not None:

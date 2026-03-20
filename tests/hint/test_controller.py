@@ -99,13 +99,56 @@ class TestHintController:
             return '{"hint_text": "Check the relationship between quantities before choosing add or subtract.", "hint_level": "relational"}'
 
         controller = HintController(llm_callable=mock_llm, max_retries=0)
-        diag = _diag(DiagnosisLabel.QUANTITY_RELATION_ERROR)
+        diag = DiagnosisResult(
+            label=DiagnosisLabel.QUANTITY_RELATION_ERROR,
+            localization=ErrorLocalization.COMBINING_QUANTITIES,
+            explanation="relation issue",
+            confidence=0.9,
+        )
         vr = VerificationResult(
             status=VerificationStatus.CONFLICT,
             predicted_label=DiagnosisLabel.QUANTITY_RELATION_ERROR,
+            localization_hint=ErrorLocalization.COMBINING_QUANTITIES,
             confidence=0.9,
         )
         result = controller.get_hint("P", "S", 10.0, "6", diag, verification_result=vr)
 
         assert result.fallback_used is False
         assert result.hint_level == HintLevel.RELATIONAL
+
+    def test_low_confidence_arithmetic_prefers_conceptual_level(self):
+        prompts = []
+
+        def mock_llm(prompt):
+            prompts.append(prompt)
+            return '{"hint_text": "Think about the overall idea of the calculation before doing the next step again.", "hint_level": "conceptual"}'
+
+        controller = HintController(llm_callable=mock_llm, max_retries=0)
+        diag = _diag(DiagnosisLabel.ARITHMETIC_ERROR, confidence=0.4)
+        result = controller.get_hint("P", "S", 10.0, "11", diag)
+
+        assert result.fallback_used is False
+        assert result.hint_level == HintLevel.CONCEPTUAL
+
+    def test_target_selection_prefers_conceptual_level(self):
+        def mock_llm(prompt):
+            return '{"hint_text": "Read the question again and focus on what value it is asking you to find.", "hint_level": "conceptual"}'
+
+        controller = HintController(llm_callable=mock_llm, max_retries=0)
+        diag = DiagnosisResult(
+            label=DiagnosisLabel.TARGET_MISUNDERSTANDING,
+            localization=ErrorLocalization.TARGET_SELECTION,
+            explanation="target selection issue",
+            confidence=0.85,
+        )
+        vr = VerificationResult(
+            status=VerificationStatus.CONFLICT,
+            predicted_label=DiagnosisLabel.TARGET_MISUNDERSTANDING,
+            localization_hint=ErrorLocalization.TARGET_SELECTION,
+            confidence=0.92,
+        )
+
+        result = controller.get_hint("P", "S", 10.0, "5", diag, verification_result=vr)
+
+        assert result.fallback_used is False
+        assert result.hint_level == HintLevel.CONCEPTUAL

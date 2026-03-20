@@ -8,11 +8,11 @@ from src.models import (
     DiagnosisResult,
     DiagnosisLabel,
     VerificationResult,
-    VerificationStatus,
 )
 from src.hint.engine import generate_hint
 from src.hint.verifier import verify_hint_no_spoiler, verify_hint_alignment
 from src.hint.fallback import get_static_fallback_hint
+from src.hint.policy import derive_preferred_hint_level
 
 logger = logging.getLogger(__name__)
 
@@ -30,24 +30,11 @@ class HintController:
         verification_result: Optional[VerificationResult],
         preferred_level: Optional[HintLevel],
     ) -> Optional[HintLevel]:
-        if preferred_level is not None:
-            return preferred_level
-
-        if verification_result is not None:
-            if verification_result.status == VerificationStatus.CONFLICT:
-                return HintLevel.RELATIONAL
-            if verification_result.status == VerificationStatus.INSUFFICIENT_EVIDENCE:
-                return HintLevel.CONCEPTUAL
-
-        if diagnosis.confidence < 0.5:
-            return HintLevel.CONCEPTUAL
-
-        if diagnosis.label == DiagnosisLabel.ARITHMETIC_ERROR:
-            return HintLevel.NEXT_STEP
-        if diagnosis.label == DiagnosisLabel.QUANTITY_RELATION_ERROR:
-            return HintLevel.RELATIONAL
-
-        return None
+        return derive_preferred_hint_level(
+            diagnosis=diagnosis,
+            verification_result=verification_result,
+            preferred_level=preferred_level,
+        )
 
     def get_hint(
         self,
@@ -84,6 +71,8 @@ class HintController:
         )
 
         last_failed_hint = None
+        attempted_hints = []
+        verification_notes = []
         for attempt in range(self.max_retries + 1):
             hint_res = generate_hint(
                 problem_text=problem_text,
@@ -95,22 +84,33 @@ class HintController:
             )
 
             if hint_res.generated_status == "success":
+                attempted_hints.append(hint_res.hint_text)
                 spoiler_ok = verify_hint_no_spoiler(hint_res.hint_text, reference_answer)
                 alignment_ok = verify_hint_alignment(
                     hint_res.hint_text,
                     diagnosis_label=diagnosis.label,
                     expected_level=hint_res.hint_level,
+                    diagnosis_localization=diagnosis.localization,
                 )
 
                 if spoiler_ok and alignment_ok:
+                    hint_res.attempted_hints = attempted_hints
+                    hint_res.verification_notes = verification_notes + ["accepted"]
                     return hint_res
 
                 if not spoiler_ok:
+                    verification_notes.append(f"attempt_{attempt + 1}: spoiler")
                     logger.warning("Attempt %d: Spoiler detected in generated hint.", attempt + 1)
+                    logger.warning("Rejected hint text: %s", hint_res.hint_text)
                 if not alignment_ok:
+                    verification_notes.append(f"attempt_{attempt + 1}: alignment_failed")
                     logger.warning("Attempt %d: Hint pedagogical alignment check failed.", attempt + 1)
+                    logger.warning("Rejected hint text: %s", hint_res.hint_text)
                 last_failed_hint = hint_res
             else:
+                if hint_res.hint_text:
+                    attempted_hints.append(hint_res.hint_text)
+                verification_notes.append(f"attempt_{attempt + 1}: generation_failed")
                 logger.warning("Attempt %d: Hint generation failed.", attempt + 1)
                 last_failed_hint = hint_res
 
@@ -127,4 +127,6 @@ class HintController:
             generated_status="success",
             diagnosis_label_used=diagnosis.label,
             fallback_used=True,
+            attempted_hints=attempted_hints,
+            verification_notes=verification_notes,
         )

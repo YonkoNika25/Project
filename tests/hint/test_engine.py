@@ -58,7 +58,14 @@ class TestGenerateHint:
             return '{"hint_text": "Try recalculating the last step."}'
 
         diag = _diag(DiagnosisLabel.ARITHMETIC_ERROR)
-        result = generate_hint("5+5", "10", "11", diag, llm_callable=mock_llm)
+        result = generate_hint(
+            "5+5",
+            "10",
+            "11",
+            diag,
+            llm_callable=mock_llm,
+            preferred_level=HintLevel.NEXT_STEP,
+        )
         assert result.hint_text == "Try recalculating the last step."
         assert result.hint_level == HintLevel.NEXT_STEP
         assert result.generated_status == "success"

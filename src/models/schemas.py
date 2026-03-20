@@ -49,7 +49,7 @@ class ReferenceSolution(BaseModel):
 
 class SolverConfig(BaseModel):
     """Configuration for the Qwen solver client."""
-    model_name: str = Field(default="Qwen/Qwen2.5-Math-7B-Instruct", description="Model identifier")
+    model_name: str = Field(default="Qwen/Qwen2.5-7B-Instruct", description="Model identifier")
     api_base: str = Field(default="http://localhost:8000/v1", description="OpenAI-compatible API base URL")
     api_key: Optional[str] = Field(default=None, description="Optional bearer token for API authentication")
     extra_headers: Dict[str, str] = Field(default_factory=dict, description="Optional additional HTTP headers")
@@ -119,6 +119,7 @@ class ErrorLocalization(str, Enum):
     NONE = "none"  # correct answer
     FINAL_COMPUTATION = "final_computation"
     INTERMEDIATE_STEP = "intermediate_step"
+    COMBINING_QUANTITIES = "combining_quantities"
     TARGET_SELECTION = "target_selection"
     UNKNOWN = "unknown"
 
@@ -197,5 +198,142 @@ class HintResult(BaseModel):
     generated_status: str = Field(description="Status of the generation process (e.g., success, failure)")
     diagnosis_label_used: DiagnosisLabel = Field(description="The diagnosis label that triggered this hint")
     fallback_used: bool = Field(default=False, description="Whether a fallback strategy was used")
+    attempted_hints: List[str] = Field(
+        default_factory=list,
+        description="Raw hint texts produced across attempts before fallback/success",
+    )
+    verification_notes: List[str] = Field(
+        default_factory=list,
+        description="Verifier decisions or failure reasons collected during hint generation",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# Benchmark / Evaluation Data Schemas
+
+class BenchmarkProblem(BaseModel):
+    """Normalized benchmark problem description used for curated evaluation cases."""
+    text: str
+    domain: str = Field(default="arithmetic_word_problem")
+    language: str = Field(default="en")
+    difficulty: str = Field(default="unknown")
+    requires_multi_step: bool = Field(default=False)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GoldReferenceAnnotation(BaseModel):
+    """Gold reference answer and optional worked solution for a benchmark case."""
+    final_answer: float
+    solution_text: str
+    answer_format: str = Field(default="numeric")
+    answer_span: Optional[str] = Field(default=None)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StudentCase(BaseModel):
+    """Synthetic or curated student response attached to a benchmark problem."""
+    student_answer_raw: str
+    student_answer_value: Optional[float] = Field(default=None)
+    answer_source: str = Field(default="synthetic")
+    error_generation_method: str
+    student_rationale: Optional[str] = Field(default=None)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GoldDiagnosisAnnotation(BaseModel):
+    """Gold diagnosis target for a benchmark sample."""
+    primary_label: DiagnosisLabel
+    secondary_label: Optional[DiagnosisLabel] = Field(default=None)
+    localization: ErrorLocalization
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str
+    review_status: str = Field(default="draft")
+    review_notes: Optional[str] = Field(default=None)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GoldHintAnnotation(BaseModel):
+    """Optional gold hint guidance for a benchmark sample."""
+    preferred_level: HintLevel
+    reference_hints: List[str] = Field(default_factory=list)
+    must_not_contain: List[str] = Field(default_factory=list)
+    pedagogical_notes: Optional[str] = Field(default=None)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BenchmarkQuantityAnnotation(BaseModel):
+    """Quantity-level annotation for benchmark symbolic analysis."""
+    value: float
+    surface_text: str
+    role: str
+    provenance: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SymbolicAnnotation(BaseModel):
+    """Gold symbolic description stored with a benchmark sample."""
+    quantities: List[BenchmarkQuantityAnnotation] = Field(default_factory=list)
+    target_text: Optional[str] = Field(default=None)
+    target_type: Optional[str] = Field(default=None)
+    expected_relation: Optional[str] = Field(default=None)
+    expected_operation: OperationType = Field(default=OperationType.UNKNOWN)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BenchmarkMetadata(BaseModel):
+    """Metadata for audit workflow and benchmark management."""
+    created_by: str
+    review_status: str = Field(default="draft")
+    reviewers: List[str] = Field(default_factory=list)
+    notes: Optional[str] = Field(default=None)
+    tags: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BenchmarkSample(BaseModel):
+    """Full benchmark case used for diagnosis and hint evaluation."""
+    sample_id: str
+    split: str
+    source_dataset: str
+    source_problem_id: str
+    source_type: str
+    problem: BenchmarkProblem
+    gold_reference: GoldReferenceAnnotation
+    student_case: StudentCase
+    gold_diagnosis: GoldDiagnosisAnnotation
+    gold_hint: Optional[GoldHintAnnotation] = Field(default=None)
+    symbolic_annotation: Optional[SymbolicAnnotation] = Field(default=None)
+    metadata: BenchmarkMetadata
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AuditDecision(str, Enum):
+    """Manual audit action for a benchmark sample."""
+    KEEP = "keep"
+    FIX = "fix"
+    DROP = "drop"
+
+
+class AuditReviewRecord(BaseModel):
+    """Human review decision attached to a benchmark sample."""
+    sample_id: str
+    decision: AuditDecision = Field(default=AuditDecision.KEEP)
+    reviewer: Optional[str] = Field(default=None)
+    notes: str = Field(default="")
+    updated_primary_label: Optional[DiagnosisLabel] = Field(default=None)
+    updated_localization: Optional[ErrorLocalization] = Field(default=None)
+    updated_rationale: Optional[str] = Field(default=None)
+    updated_split: Optional[str] = Field(default=None)
+    approved_for_subset: bool = Field(default=False)
 
     model_config = ConfigDict(extra="forbid")

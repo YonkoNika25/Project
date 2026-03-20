@@ -86,6 +86,7 @@ def evaluate(split: str, limit: int) -> None:
                 hint_res.hint_text,
                 diagnosis_label=diag_res.label,
                 expected_level=hint_res.hint_level,
+                diagnosis_localization=diag_res.localization,
             ):
                 hint_alignment_ok += 1
     finally:

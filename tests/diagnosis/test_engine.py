@@ -2,6 +2,7 @@ import pytest
 from src.models import (
     AnswerCheckResult, Correctness, DiagnosisLabel,
     ErrorLocalization, DiagnosisResult,
+    OperationType, QuantityFact, SymbolicState,
     VerificationResult, VerificationStatus,
 )
 from src.diagnosis.engine import (
@@ -112,6 +113,11 @@ class TestDiagnose:
 class TestDiagnoseWithSymbolicEvidence:
     def test_conflict_maps_to_quantity_relation_error(self):
         check = _check(Correctness.INCORRECT, 6.0)
+        state = SymbolicState(
+            quantities=[QuantityFact(surface_form="10", value=10.0), QuantityFact(surface_form="4", value=4.0)],
+            expected_operation=OperationType.ADDITIVE,
+            builder_confidence=0.8,
+        )
         vr = VerificationResult(
             status=VerificationStatus.CONFLICT,
             predicted_label=DiagnosisLabel.QUANTITY_RELATION_ERROR,
@@ -119,18 +125,78 @@ class TestDiagnoseWithSymbolicEvidence:
             confidence=0.92,
             explanation="conflict",
         )
-        result = diagnose_with_symbolic_evidence(check, vr)
+        result = diagnose_with_symbolic_evidence(check, state, vr)
         assert result is not None
         assert result.label == DiagnosisLabel.QUANTITY_RELATION_ERROR
 
     def test_verified_maps_to_arithmetic_error(self):
         check = _check(Correctness.INCORRECT, 15.0)
+        state = SymbolicState(
+            quantities=[QuantityFact(surface_form="10", value=10.0), QuantityFact(surface_form="4", value=4.0)],
+            expected_operation=OperationType.ADDITIVE,
+            builder_confidence=0.8,
+        )
         vr = VerificationResult(
             status=VerificationStatus.VERIFIED,
             confidence=0.7,
             explanation="consistent",
         )
-        result = diagnose_with_symbolic_evidence(check, vr)
+        result = diagnose_with_symbolic_evidence(check, state, vr)
+        assert result is not None
+        assert result.label == DiagnosisLabel.ARITHMETIC_ERROR
+
+    def test_verified_does_not_overclaim_when_symbolic_reliability_is_weak(self):
+        check = _check(Correctness.INCORRECT, 15.0)
+        weak_state = SymbolicState(
+            quantities=[QuantityFact(surface_form="10", value=10.0)],
+            expected_operation=OperationType.UNKNOWN,
+            builder_confidence=0.2,
+        )
+        vr = VerificationResult(
+            status=VerificationStatus.VERIFIED,
+            confidence=0.65,
+            explanation="consistent",
+        )
+        result = diagnose_with_symbolic_evidence(check, weak_state, vr)
+        assert result is None
+
+    def test_strong_conflict_can_still_pass_guardrail_with_weak_builder(self):
+        check = _check(Correctness.INCORRECT, 5.0)
+        weak_state = SymbolicState(
+            quantities=[QuantityFact(surface_form="20", value=20.0), QuantityFact(surface_form="5", value=5.0)],
+            expected_operation=OperationType.UNKNOWN,
+            builder_confidence=0.2,
+        )
+        vr = VerificationResult(
+            status=VerificationStatus.CONFLICT,
+            predicted_label=DiagnosisLabel.TARGET_MISUNDERSTANDING,
+            localization_hint=ErrorLocalization.TARGET_SELECTION,
+            confidence=0.82,
+            explanation="student matches visible quantity",
+        )
+        result = diagnose_with_symbolic_evidence(check, weak_state, vr)
+        assert result is not None
+        assert result.label == DiagnosisLabel.TARGET_MISUNDERSTANDING
+
+    def test_near_miss_arithmetic_can_pass_guardrail_with_weaker_symbolic_state(self):
+        check = AnswerCheckResult(
+            correctness=Correctness.INCORRECT,
+            comparison_type="exact",
+            student_value=77.0,
+            normalization_status="success",
+            reference_value=70.0,
+        )
+        weak_state = SymbolicState(
+            quantities=[QuantityFact(surface_form="40", value=40.0), QuantityFact(surface_form="10", value=10.0)],
+            expected_operation=OperationType.UNKNOWN,
+            builder_confidence=0.25,
+        )
+        vr = VerificationResult(
+            status=VerificationStatus.VERIFIED,
+            confidence=0.65,
+            explanation="consistent",
+        )
+        result = diagnose_with_symbolic_evidence(check, weak_state, vr)
         assert result is not None
         assert result.label == DiagnosisLabel.ARITHMETIC_ERROR
 

@@ -1,0 +1,142 @@
+{
+  "total_samples": 90,
+  "split_distribution": {
+    "train_build": 45,
+    "dev_audit": 27,
+    "test_paper": 18
+  },
+  "diagnosis": {
+    "accuracy": 1.0,
+    "total": 90,
+    "labeled_count": 90,
+    "correct": 90,
+    "incorrect": 0,
+    "label_distribution": {
+      "correct_answer": 30,
+      "arithmetic_error": 30,
+      "quantity_relation_error": 15,
+      "target_misunderstanding": 15
+    }
+  },
+  "localization": {
+    "accuracy": 1.0,
+    "total": 90,
+    "correct": 90
+  },
+  "calibration": {
+    "labeled_count": 90,
+    "num_bins": 5,
+    "ece": 0.15285555555555555,
+    "mce": 0.29333333333333333,
+    "bins": [
+      {
+        "low": 0.0,
+        "high": 0.2,
+        "count": 0,
+        "accuracy": 0.0,
+        "avg_confidence": 0.0,
+        "gap": 0.0
+      },
+      {
+        "low": 0.2,
+        "high": 0.4,
+        "count": 0,
+        "accuracy": 0.0,
+        "avg_confidence": 0.0,
+        "gap": 0.0
+      },
+      {
+        "low": 0.4,
+        "high": 0.6,
+        "count": 0,
+        "accuracy": 0.0,
+        "avg_confidence": 0.0,
+        "gap": 0.0
+      },
+      {
+        "low": 0.6,
+        "high": 0.8,
+        "count": 30,
+        "accuracy": 1.0,
+        "avg_confidence": 0.7066666666666667,
+        "gap": 0.29333333333333333
+      },
+      {
+        "low": 0.8,
+        "high": 1.0,
+        "count": 60,
+        "accuracy": 1.0,
+        "avg_confidence": 0.9173833333333333,
+        "gap": 0.08261666666666667
+      }
+    ]
+  },
+  "ablation": {
+    "labeled_count": 90,
+    "with_symbolic_accuracy": 1.0,
+    "without_symbolic_accuracy": 0.3333333333333333,
+    "delta_accuracy": 0.6666666666666667,
+    "changed_predictions": 60,
+    "improved_cases": 60,
+    "degraded_cases": 0
+  },
+  "hints": {
+    "spoiler_free_rate": 1.0,
+    "hint_alignment_rate": 1.0,
+    "hint_fallback_rate": 0.6666666666666666
+  },
+  "verification_status_distribution": {
+    "verified": 60,
+    "conflict": 30
+  },
+  "confusion_matrix": {
+    "correct_answer": {
+      "correct_answer": 30,
+      "arithmetic_error": 0,
+      "quantity_relation_error": 0,
+      "target_misunderstanding": 0,
+      "unparseable_answer": 0,
+      "unknown_error": 0
+    },
+    "arithmetic_error": {
+      "correct_answer": 0,
+      "arithmetic_error": 30,
+      "quantity_relation_error": 0,
+      "target_misunderstanding": 0,
+      "unparseable_answer": 0,
+      "unknown_error": 0
+    },
+    "quantity_relation_error": {
+      "correct_answer": 0,
+      "arithmetic_error": 0,
+      "quantity_relation_error": 15,
+      "target_misunderstanding": 0,
+      "unparseable_answer": 0,
+      "unknown_error": 0
+    },
+    "target_misunderstanding": {
+      "correct_answer": 0,
+      "arithmetic_error": 0,
+      "quantity_relation_error": 0,
+      "target_misunderstanding": 15,
+      "unparseable_answer": 0,
+      "unknown_error": 0
+    },
+    "unparseable_answer": {
+      "correct_answer": 0,
+      "arithmetic_error": 0,
+      "quantity_relation_error": 0,
+      "target_misunderstanding": 0,
+      "unparseable_answer": 0,
+      "unknown_error": 0
+    },
+    "unknown_error": {
+      "correct_answer": 0,
+      "arithmetic_error": 0,
+      "quantity_relation_error": 0,
+      "target_misunderstanding": 0,
+      "unparseable_answer": 0,
+      "unknown_error": 0
+    }
+  }
+}

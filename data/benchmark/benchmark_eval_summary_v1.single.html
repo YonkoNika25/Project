@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>benchmark_eval_summary_v1.json</title>
+  <style>
+    :root {
+      --bg: #f6f3ee;
+      --panel: #fffdf9;
+      --line: #d8cfc0;
+      --ink: #1e1b18;
+      --muted: #6b645a;
+      --accent: #a24b2a;
+      --shadow: 0 16px 38px rgba(72, 53, 30, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(162, 75, 42, 0.08), transparent 24%),
+        linear-gradient(180deg, #fbf8f3 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }
+
+    .page {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, rgba(162, 75, 42, 0.12), rgba(255,255,255,0.96));
+      border: 1px solid rgba(162, 75, 42, 0.16);
+      border-radius: 22px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+      margin-bottom: 18px;
+    }
+
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: 32px;
+      line-height: 1.1;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .stat {
+      background: rgba(255,255,255,0.84);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px 16px;
+    }
+
+    .stat .label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }
+
+    .stat .value {
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+
+    .section h2 {
+      margin: 0 0 14px;
+      font-size: 20px;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 10px 14px;
+      font-size: 14px;
+    }
+
+    .kv .k {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .table-wrap {
+      display: block;
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.82);
+      max-width: 100%;
+    }
+
+    table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+      min-width: 160px;
+    }
+
+    th {
+      background: rgba(255,255,255,0.92);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    .code-block {
+      white-space: pre-wrap;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      overflow: auto;
+      max-height: 700px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #f2ede4;
+      color: #4f4a42;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <h1>benchmark_eval_summary_v1.json</h1>
+      <p>Trang HTML tĩnh để rà soát một file dữ liệu duy nhất. Không dùng JavaScript động để tránh lỗi hiển thị.</p>
+      <div class="stats">
+        <div class="stat"><span class="label">Loại file</span><span class="value">JSON</span></div>
+<div class="stat"><span class="label">Keys</span><span class="value">9</span></div>
+<div class="stat"><span class="label">Dung lượng</span><span class="value">3.4 KB</span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Tổng quan file</h2>
+      <div class="kv">
+        <div class="k">Tên file</div><div>benchmark_eval_summary_v1.json</div>
+<div class="k">Đường dẫn</div><div>data/benchmark/benchmark_eval_summary_v1.json</div>
+<div class="k">Loại file</div><div>JSON</div>
+<div class="k">Cấu trúc</div><div>Dữ liệu dạng object</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Preview dữ liệu</h2>
+      <div class="note">Preview 50 dòng đầu từ object-level summary.</div>
+      
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>key</th><th>value</th></tr></thead>
+        <tbody><tr><td>total_samples</td><td>90</td></tr><tr><td>split_distribution</td><td>{&quot;train_build&quot;: 45, &quot;dev_audit&quot;: 27, &quot;test_paper&quot;: 18}</td></tr><tr><td>diagnosis</td><td>{&quot;accuracy&quot;: 0.6666666666666666, &quot;total&quot;: 90, &quot;labeled_count&quot;: 90, &quot;correct&quot;: 60, &quot;incorrect&quot;: 30, &quot;label_distribution&quot;: {&quot;correct_answer&quot;: 30, &quot;arithmetic_error&quot;: 54, &quot;unknown_error&quot;: 6}}</td></tr><tr><td>localization</td><td>{&quot;accuracy&quot;: 0.6666666666666666, &quot;total&quot;: 90, &quot;correct&quot;: 60}</td></tr><tr><td>calibration</td><td>{&quot;labeled_count&quot;: 90, &quot;num_bins&quot;: 5, &quot;ece&quot;: 0.06333333333333332, &quot;mce&quot;: 0.10000000000000002, &quot;bins&quot;: [{&quot;low&quot;: 0.0, &quot;high&quot;: 0.2, &quot;count&quot;: 6, &quot;accuracy&quot;: 0.0, &quot;avg_confidence&quot;: 0.10000000000000002, &quot;gap&quot;: 0.10000000000000002}, {&quot;low&quot;: 0.2, &quot;high&quot;: 0.4, &quot;count&quot;: 0, &quot;accuracy&quot;: 0.0, &quot;avg_confidence&quot;: 0.0, &quot;gap&quot;: 0.0}, {&quot;low&quot;: 0.4, &quot;high&quot;: 0.6, &quot;count&quot;: 0, &quot;accuracy&quot;: 0.0, &quot;avg_confidence&quot;: 0.0, &quot;gap&quot;: 0.0}, {&quot;low&quot;: 0.6, &quot;high&quot;: 0.8, &quot;count&quot;: 54, &quot;accuracy&quot;: 0.5555555555555556, &quot;avg_confidence&quot;: 0.65, &quot;gap&quot;: 0.09444444444444444}, {&quot;low&quot;: 0.8, &quot;high&quot;: 1.0, &quot;count&quot;: 30, &quot;accuracy&quot;: 1.0, &quot;avg_confidence&quot;: 1.0, &quot;gap&quot;: 0.0}]}</td></tr><tr><td>ablation</td><td>{&quot;labeled_count&quot;: 90, &quot;with_symbolic_accuracy&quot;: 0.6666666666666666, &quot;without_symbolic_accuracy&quot;: 0.3333333333333333, &quot;delta_accuracy&quot;: 0.3333333333333333, &quot;changed_predictions&quot;: 54, &quot;improved_cases&quot;: 30, &quot;degraded_cases&quot;: 0}</td></tr><tr><td>hints</td><td>{&quot;spoiler_free_rate&quot;: 1.0, &quot;hint_alignment_rate&quot;: 1.0, &quot;hint_fallback_rate&quot;: 0.6666666666666666}</td></tr><tr><td>verification_status_distribution</td><td>{&quot;verified&quot;: 84, &quot;insufficient_evidence&quot;: 6}</td></tr><tr><td>confusion_matrix</td><td>{&quot;correct_answer&quot;: {&quot;correct_answer&quot;: 30, &quot;arithmetic_error&quot;: 0, &quot;quantity_relation_error&quot;: 0, &quot;target_misunderstanding&quot;: 0, &quot;unparseable_answer&quot;: 0, &quot;unknown_error&quot;: 0}, &quot;arithmetic_error&quot;: {&quot;correct_answer&quot;: 0, &quot;arithmetic_error&quot;: 30, &quot;quantity_relation_error&quot;: 0, &quot;target_misunderstanding&quot;: 0, &quot;unparseable_answer&quot;: 0, &quot;unknown_error&quot;: 0}, &quot;quantity_relation_error&quot;: {&quot;correct_answer&quot;: 0, &quot;arithmetic_error&quot;: 12, &quot;quantity_relation_error&quot;: 0, &quot;target_misunderstanding&quot;: 0, &quot;unparseable_answer&quot;: 0, &quot;unknown_error&quot;: 3}, &quot;target_misunderstanding&quot;: {&quot;correct_answer&quot;: 0, &quot;arithmetic_error&quot;: 12, &quot;quantity_relation_error&quot;: 0, &quot;target_misunderstanding&quot;: 0, &quot;unparseable_answer&quot;: 0, &quot;unknown_error&quot;: 3}, &quot;unparseable_answer&quot;: {&quot;correct_answer&quot;: 0, &quot;arithmetic_error&quot;: 0, &quot;quantity_relation_error&quot;: 0, &quot;target_misunderstanding&quot;: 0, &quot;unparseable_answer&quot;: 0, &quot;unknown_error&quot;: 0}, &quot;unknown_error&quot;: {&quot;correct_answer&quot;: 0, &quot;arithmetic_error&quot;: 0, &quot;quantity_relation_error&quot;: 0, &quot;target_misunderstanding&quot;: 0, &quot;unparseable_answer&quot;: 0, &quot;unknown_error&quot;: 0}}</td></tr></tbody>
+      </table>
+    </div>
+    
+    </section>
+
+    <section class="section">
+      <h2>Raw content</h2>
+      <div class="code-block">{
+  &quot;total_samples&quot;: 90,
+  &quot;split_distribution&quot;: {
+    &quot;train_build&quot;: 45,
+    &quot;dev_audit&quot;: 27,
+    &quot;test_paper&quot;: 18
+  },
+  &quot;diagnosis&quot;: {
+    &quot;accuracy&quot;: 0.6666666666666666,
+    &quot;total&quot;: 90,
+    &quot;labeled_count&quot;: 90,
+    &quot;correct&quot;: 60,
+    &quot;incorrect&quot;: 30,
+    &quot;label_distribution&quot;: {
+      &quot;correct_answer&quot;: 30,
+      &quot;arithmetic_error&quot;: 54,
+      &quot;unknown_error&quot;: 6
+    }
+  },
+  &quot;localization&quot;: {
+    &quot;accuracy&quot;: 0.6666666666666666,
+    &quot;total&quot;: 90,
+    &quot;correct&quot;: 60
+  },
+  &quot;calibration&quot;: {
+    &quot;labeled_count&quot;: 90,
+    &quot;num_bins&quot;: 5,
+    &quot;ece&quot;: 0.06333333333333332,
+    &quot;mce&quot;: 0.10000000000000002,
+    &quot;bins&quot;: [
+      {
+        &quot;low&quot;: 0.0,
+        &quot;high&quot;: 0.2,
+        &quot;count&quot;: 6,
+        &quot;accuracy&quot;: 0.0,
+        &quot;avg_confidence&quot;: 0.10000000000000002,
+        &quot;gap&quot;: 0.10000000000000002
+      },
+      {
+        &quot;low&quot;: 0.2,
+        &quot;high&quot;: 0.4,
+        &quot;count&quot;: 0,
+        &quot;accuracy&quot;: 0.0,
+        &quot;avg_confidence&quot;: 0.0,
+        &quot;gap&quot;: 0.0
+      },
+      {
+        &quot;low&quot;: 0.4,
+        &quot;high&quot;: 0.6,
+        &quot;count&quot;: 0,
+        &quot;accuracy&quot;: 0.0,
+        &quot;avg_confidence&quot;: 0.0,
+        &quot;gap&quot;: 0.0
+      },
+      {
+        &quot;low&quot;: 0.6,
+        &quot;high&quot;: 0.8,
+        &quot;count&quot;: 54,
+        &quot;accuracy&quot;: 0.5555555555555556,
+        &quot;avg_confidence&quot;: 0.65,
+        &quot;gap&quot;: 0.09444444444444444
+      },
+      {
+        &quot;low&quot;: 0.8,
+        &quot;high&quot;: 1.0,
+        &quot;count&quot;: 30,
+        &quot;accuracy&quot;: 1.0,
+        &quot;avg_confidence&quot;: 1.0,
+        &quot;gap&quot;: 0.0
+      }
+    ]
+  },
+  &quot;ablation&quot;: {
+    &quot;labeled_count&quot;: 90,
+    &quot;with_symbolic_accuracy&quot;: 0.6666666666666666,
+    &quot;without_symbolic_accuracy&quot;: 0.3333333333333333,
+    &quot;delta_accuracy&quot;: 0.3333333333333333,
+    &quot;changed_predictions&quot;: 54,
+    &quot;improved_cases&quot;: 30,
+    &quot;degraded_cases&quot;: 0
+  },
+  &quot;hints&quot;: {
+    &quot;spoiler_free_rate&quot;: 1.0,
+    &quot;hint_alignment_rate&quot;: 1.0,
+    &quot;hint_fallback_rate&quot;: 0.6666666666666666
+  },
+  &quot;verification_status_distribution&quot;: {
+    &quot;verified&quot;: 84,
+    &quot;insufficient_evidence&quot;: 6
+  },
+  &quot;confusion_matrix&quot;: {
+    &quot;correct_answer&quot;: {
+      &quot;correct_answer&quot;: 30,
+      &quot;arithmetic_error&quot;: 0,
+      &quot;quantity_relation_error&quot;: 0,
+      &quot;target_misunderstanding&quot;: 0,
+      &quot;unparseable_answer&quot;: 0,
+      &quot;unknown_error&quot;: 0
+    },
+    &quot;arithmetic_error&quot;: {
+      &quot;correct_answer&quot;: 0,
+      &quot;arithmetic_error&quot;: 30,
+      &quot;quantity_relation_error&quot;: 0,
+      &quot;target_misunderstanding&quot;: 0,
+      &quot;unparseable_answer&quot;: 0,
+      &quot;unknown_error&quot;: 0
+    },
+    &quot;quantity_relation_error&quot;: {
+      &quot;correct_answer&quot;: 0,
+      &quot;arithmetic_error&quot;: 12,
+      &quot;quantity_relation_error&quot;: 0,
+      &quot;target_misunderstanding&quot;: 0,
+      &quot;unparseable_answer&quot;: 0,
+      &quot;unknown_error&quot;: 3
+    },
+    &quot;target_misunderstanding&quot;: {
+      &quot;correct_answer&quot;: 0,
+      &quot;arithmetic_error&quot;: 12,
+      &quot;quantity_relation_error&quot;: 0,
+      &quot;target_misunderstanding&quot;: 0,
+      &quot;unparseable_answer&quot;: 0,
+      &quot;unknown_error&quot;: 3
+    },
+    &quot;unparseable_answer&quot;: {
+      &quot;correct_answer&quot;: 0,
+      &quot;arithmetic_error&quot;: 0,
+      &quot;quantity_relation_error&quot;: 0,
+      &quot;target_misunderstanding&quot;: 0,
+      &quot;unparseable_answer&quot;: 0,
+      &quot;unknown_error&quot;: 0
+    },
+    &quot;unknown_error&quot;: {
+      &quot;correct_answer&quot;: 0,
+      &quot;arithmetic_error&quot;: 0,
+      &quot;quantity_relation_error&quot;: 0,
+      &quot;target_misunderstanding&quot;: 0,
+      &quot;unparseable_answer&quot;: 0,
+      &quot;unknown_error&quot;: 0
+    }
+  }
+}</div>
+    </section>
+  </div>
+</body>
+</html>

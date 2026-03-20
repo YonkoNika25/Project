@@ -4,9 +4,9 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict, Iterable, List
 
-from src.models import DiagnosisLabel
+from src.models import AuditDecision, AuditReviewRecord, BenchmarkSample, DiagnosisLabel, ErrorLocalization
 
 
 def _parse_label(raw: str) -> DiagnosisLabel:
@@ -65,10 +65,98 @@ def _from_row_iter(rows: Iterable[dict]) -> Dict[str, DiagnosisLabel]:
     return label_map
 
 
-def write_audit_jsonl(path: str, entries: Iterable[dict]) -> None:
-    """Write audit records to JSONL file."""
+def _write_jsonl(path: str, entries: Iterable[dict]) -> None:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("w", encoding="utf-8") as f:
         for row in entries:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def write_audit_jsonl(path: str, entries: Iterable[dict]) -> None:
+    """Write audit records to JSONL file."""
+    _write_jsonl(path, entries)
+
+
+def write_benchmark_jsonl(path: str, entries: Iterable[dict]) -> None:
+    """Write benchmark sample drafts to JSONL file."""
+    _write_jsonl(path, entries)
+
+
+def build_audit_review_template(samples: Iterable[BenchmarkSample]) -> List[AuditReviewRecord]:
+    """Create default review records for a benchmark draft."""
+    return [
+        AuditReviewRecord(
+            sample_id=sample.sample_id,
+            decision=AuditDecision.KEEP,
+            reviewer=None,
+            notes="",
+            updated_primary_label=sample.gold_diagnosis.primary_label,
+            updated_localization=sample.gold_diagnosis.localization,
+            updated_rationale=sample.gold_diagnosis.rationale,
+            updated_split=sample.split,
+            approved_for_subset=False,
+        )
+        for sample in samples
+    ]
+
+
+def write_audit_review_csv(path: str, entries: Iterable[AuditReviewRecord]) -> None:
+    """Write review decisions to CSV for manual editing."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "sample_id",
+        "decision",
+        "reviewer",
+        "notes",
+        "updated_primary_label",
+        "updated_localization",
+        "updated_rationale",
+        "updated_split",
+        "approved_for_subset",
+    ]
+    with p.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for entry in entries:
+            row = entry.model_dump(mode="json")
+            writer.writerow(row)
+
+
+def load_audit_review_csv(path: str) -> List[AuditReviewRecord]:
+    """Load manual audit decisions from CSV."""
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Audit review CSV not found: {path}")
+
+    records: List[AuditReviewRecord] = []
+    with p.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            sample_id = str(row.get("sample_id") or "").strip()
+            if not sample_id:
+                continue
+
+            decision_raw = str(row.get("decision") or AuditDecision.KEEP.value).strip() or AuditDecision.KEEP.value
+            decision = AuditDecision(decision_raw)
+
+            label_raw = str(row.get("updated_primary_label") or "").strip()
+            localization_raw = str(row.get("updated_localization") or "").strip()
+            approved_raw = str(row.get("approved_for_subset") or "").strip().lower()
+
+            records.append(
+                AuditReviewRecord(
+                    sample_id=sample_id,
+                    decision=decision,
+                    reviewer=str(row.get("reviewer") or "").strip() or None,
+                    notes=str(row.get("notes") or "").strip(),
+                    updated_primary_label=DiagnosisLabel(label_raw) if label_raw else None,
+                    updated_localization=ErrorLocalization(localization_raw) if localization_raw else None,
+                    updated_rationale=str(row.get("updated_rationale") or "").strip() or None,
+                    updated_split=str(row.get("updated_split") or "").strip() or None,
+                    approved_for_subset=approved_raw in {"1", "true", "yes", "y"},
+                )
+            )
+
+    return records

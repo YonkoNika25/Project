@@ -36,8 +36,8 @@ def run_tutor_demo():
         return
 
     # 1. Input Problem (GSM8K Style)
-    problem_text = "Jan has 3 apples. She buys 10 more apples. How many apples does Jan have now?"
-    student_answer_raw = "She has 20 apples." # Wrong answer for demo
+    problem_text = "A concert ticket costs $40. Mr. Benson bought 12 tickets and received a 5% discount for every ticket bought that exceeds 10. How much did Mr. Benson pay in all?"
+    student_answer_raw = "Answer is 516." # Wrong answer for demo
     
     print(f"--- PROBLEM ---\n{problem_text}")
     print(f"--- STUDENT ANSWER ---\n{student_answer_raw}\n")
@@ -110,6 +110,14 @@ def run_tutor_demo():
     print(f"Hint Level: {hint_res.hint_level.value}")
     print(f"Hint Text: {hint_res.hint_text}")
     print(f"Verification Info: Spoiler-free? {'Yes' if not hint_res.fallback_used else 'Fallback Used'}")
+    if hint_res.attempted_hints:
+        print("\n--- HINT ATTEMPTS FROM MODEL ---")
+        for idx, attempted_hint in enumerate(hint_res.attempted_hints, start=1):
+            print(f"Attempt {idx}: {attempted_hint}")
+    if hint_res.verification_notes:
+        print("\n--- HINT VERIFICATION NOTES ---")
+        for note in hint_res.verification_notes:
+            print(f"- {note}")
 
 if __name__ == "__main__":
     run_tutor_demo()

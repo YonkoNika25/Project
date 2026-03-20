@@ -1,0 +1,332 @@
+[
+  {
+    "problem_id": "gsm8k_train_00003",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00028",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00030",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00040",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00062",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00064",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00069",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00070",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00076",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00078",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00079",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00105",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00111",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00114",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00130",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00142",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00147",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00151",
+    "score": 15,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00020",
+    "score": 14,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=2"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00036",
+    "score": 14,
+    "reasons": [
+      "target_clarity=2",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00039",
+    "score": 14,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=2"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00053",
+    "score": 14,
+    "reasons": [
+      "target_clarity=2",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00054",
+    "score": 14,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=2"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00060",
+    "score": 14,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=2"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00071",
+    "score": 14,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=2"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00074",
+    "score": 14,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=2"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00082",
+    "score": 14,
+    "reasons": [
+      "target_clarity=2",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00087",
+    "score": 14,
+    "reasons": [
+      "target_clarity=2",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=3"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00095",
+    "score": 14,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=2"
+    ]
+  },
+  {
+    "problem_id": "gsm8k_train_00098",
+    "score": 14,
+    "reasons": [
+      "target_clarity=3",
+      "relation_clarity=3",
+      "symbolic_compatibility=3",
+      "case_generation_potential=3",
+      "auditability=2"
+    ]
+  }
+]
