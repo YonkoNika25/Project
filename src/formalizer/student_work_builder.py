@@ -1,11 +1,11 @@
-"""Deterministic draft building and local reconstruction for student work."""
+"""Deterministic draft building and semantic-sketch compilation for student work."""
 from __future__ import annotations
 
 import re
 
 from pydantic import ValidationError
 
-from src.formalizer.reference_trace import build_student_partial_trace
+from src.formalizer.reference_trace import build_student_partial_trace, parse_trace_step
 from src.formalizer.student_work_graph import build_student_work_graph
 from src.models import (
     CanonicalReference,
@@ -13,6 +13,7 @@ from src.models import (
     GraphValidationIssue,
     GraphValidationResult,
     ProvenanceSource,
+    StudentSemanticFact,
     StudentStepAttempt,
     StudentWorkMode,
     StudentWorkState,
@@ -78,11 +79,38 @@ def _split_student_steps(raw_answer: str) -> list[str]:
     if len(raw_lines) > 1:
         return raw_lines
 
-    sentence_lines = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", raw_answer) if segment.strip()]
+    sentence_lines = [
+        segment.strip()
+        for segment in re.split(r"(?<=[.!?])(?:\s+|(?=[A-Z0-9]))", raw_answer)
+        if segment.strip()
+    ]
     if len(sentence_lines) > 1:
         return sentence_lines
 
     return [raw_answer.strip()]
+
+
+def _normalize_text_anchor(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip()).lower()
+
+
+def _is_close_number(left: float | None, right: float | None, tolerance: float = 1e-9) -> bool:
+    return left is not None and right is not None and abs(left - right) <= tolerance
+
+
+def _observed_numbers_in_text(text: str) -> list[float]:
+    numbers: list[float] = []
+    for match in _NUMBER_PATTERN.findall(text or ""):
+        parsed = _parse_number(match)
+        if parsed is not None:
+            numbers.append(parsed)
+    return numbers
+
+
+def _known_problem_ref_values(problem: FormalizedProblem | None) -> dict[str, float]:
+    if problem is None:
+        return {}
+    return {quantity.quantity_id: quantity.value for quantity in problem.quantities}
 
 
 def _step_confidence(operation: TraceOperation | None, extracted_value: float | None, raw_text: str) -> float:
@@ -114,25 +142,30 @@ def _build_step_attempts(
     raw_answer: str,
     problem: FormalizedProblem | None,
 ) -> tuple[list[StudentStepAttempt], list[str]]:
-    trace = build_student_partial_trace(raw_answer)
     lines = _split_student_steps(raw_answer)
+    trace = build_student_partial_trace(raw_answer)
     notes = list(trace.notes)
+    if len(lines) > 1:
+        notes.append(f"student_span_candidates={len(lines)}")
     attempts: list[StudentStepAttempt] = []
 
     for index, line in enumerate(lines, start=1):
-        trace_step = trace.steps[index - 1] if index - 1 < len(trace.steps) else None
-        extracted_value = trace_step.output_value if trace_step is not None else None
-        operation = trace_step.operation if trace_step is not None else TraceOperation.UNKNOWN
-        input_values = list(trace_step.input_values) if trace_step is not None else []
+        parsed_line = parse_trace_step(line, index, trace.final_value)
+        extracted_value = parsed_line.output_value
+        operation = parsed_line.operation
+        input_values = list(parsed_line.input_values)
         referenced_ids = _referenced_problem_quantity_ids(line, problem)
 
         step_notes: list[str] = []
-        if trace_step is not None and trace_step.provenance != ProvenanceSource.UNKNOWN:
-            step_notes.append(f"trace_provenance={trace_step.provenance.value}")
+        if parsed_line.provenance != ProvenanceSource.UNKNOWN:
+            step_notes.append(f"trace_provenance={parsed_line.provenance.value}")
         if "=" in line:
             step_notes.append("contains_equation")
         if referenced_ids:
             step_notes.append(f"referenced_ids={len(referenced_ids)}")
+        number_matches = _NUMBER_PATTERN.findall(line)
+        if number_matches:
+            step_notes.append(f"observed_numbers={len(number_matches)}")
 
         attempts.append(
             StudentStepAttempt(
@@ -164,34 +197,20 @@ def _infer_selected_target_ref(
     final_answer: float | None,
     problem: FormalizedProblem | None,
 ) -> str | None:
-    if final_answer is None:
-        return None
-
-    if problem is not None:
-        for quantity in problem.quantities:
-            if abs(quantity.value - final_answer) < 1e-9:
-                return quantity.quantity_id
-
-    if problem is not None and problem.target is not None and problem.target.target_quantity_id is not None:
-        target_quantity = next(
-            (quantity for quantity in problem.quantities if quantity.quantity_id == problem.target.target_quantity_id),
-            None,
-        )
-        if (
-            target_quantity is not None
-            and target_quantity.is_target_candidate
-            and abs(target_quantity.value - final_answer) < 1e-9
-        ):
-            return problem.target.target_variable
-
     return None
 
 
 def _attach_student_graph(
     student_state: StudentWorkState,
     problem: FormalizedProblem | None,
+    *,
+    provenance_override: ProvenanceSource | None = None,
 ) -> StudentWorkState:
-    student_graph = build_student_work_graph(student_state, problem=problem)
+    student_graph = build_student_work_graph(
+        student_state,
+        problem=problem,
+        provenance_override=provenance_override,
+    )
     if student_graph is None:
         return student_state
     return student_state.model_copy(update={"student_graph": student_graph})
@@ -230,6 +249,7 @@ def _heuristic_formalize_student_work(
             raw_answer=cleaned_answer,
             normalized_final_answer=final_answer,
             mode=mode,
+            semantic_facts=[],
             steps=steps if mode != StudentWorkMode.FINAL_ANSWER_ONLY else [],
             student_graph=None,
             selected_target_ref=selected_target_ref,
@@ -241,111 +261,391 @@ def _heuristic_formalize_student_work(
     )
 
 
+def _reconcile_student_mode(
+    requested_mode: StudentWorkMode,
+    *,
+    steps: list[StudentStepAttempt],
+    normalized_final_answer: float | None,
+) -> tuple[StudentWorkMode, list[str]]:
+    inferred_mode = _infer_mode("", steps, normalized_final_answer)
+    notes: list[str] = []
+    if requested_mode in {StudentWorkMode.FINAL_ANSWER_ONLY, StudentWorkMode.UNPARSEABLE} and steps:
+        repaired_mode = StudentWorkMode.FULL_TRACE if len(steps) >= 2 else StudentWorkMode.PARTIAL_TRACE
+        notes.append(f"local_mode_repair:{requested_mode.value}->{repaired_mode.value}")
+        return repaired_mode, notes
+    if requested_mode in {StudentWorkMode.PARTIAL_TRACE, StudentWorkMode.FULL_TRACE} and not steps:
+        if normalized_final_answer is not None:
+            notes.append(f"local_mode_repair:{requested_mode.value}->final_answer_only")
+            return StudentWorkMode.FINAL_ANSWER_ONLY, notes
+        notes.append(f"local_mode_repair:{requested_mode.value}->unparseable")
+        return StudentWorkMode.UNPARSEABLE, notes
+    if requested_mode == StudentWorkMode.UNPARSEABLE and normalized_final_answer is not None:
+        repaired_mode = inferred_mode if inferred_mode != StudentWorkMode.UNPARSEABLE else StudentWorkMode.FINAL_ANSWER_ONLY
+        notes.append(f"local_mode_repair:unparseable->{repaired_mode.value}")
+        return repaired_mode, notes
+    return requested_mode, notes
+
+
 def _build_compact_student_draft(
     heuristic_state: StudentWorkState,
     problem: FormalizedProblem | None = None,
 ) -> dict:
+    candidate_spans = _split_student_steps(heuristic_state.raw_answer)
     return {
         "raw_answer": heuristic_state.raw_answer,
-        "normalized_final_answer": heuristic_state.normalized_final_answer,
-        "mode": heuristic_state.mode.value,
-        "selected_target_ref": heuristic_state.selected_target_ref,
-        "steps": [
+        "observed_final_answer": heuristic_state.normalized_final_answer,
+        "candidate_step_spans": [
             {
-                "step_id": step.step_id,
-                "raw_text": step.raw_text,
-                "operation": step.operation.value if step.operation is not None else None,
-                "input_values": list(step.input_values),
-                "extracted_value": step.extracted_value,
-                "referenced_ids": list(step.referenced_ids),
+                "span_index": index,
+                "surface_text": span,
+                "observed_numbers": [_parse_number(match) for match in _NUMBER_PATTERN.findall(span) if _parse_number(match) is not None],
+                "referenced_ids": _referenced_problem_quantity_ids(span, problem),
             }
-            for step in heuristic_state.steps
+            for index, span in enumerate(candidate_spans, start=1)
         ],
-        "allowed_refs": _allowed_student_refs(problem),
+        "allowed_problem_refs": _allowed_student_refs(problem),
+        "heuristic_notes": list(heuristic_state.notes),
     }
 
 
-def _build_student_work_from_skeleton(
+def _build_student_target_from_sketch(
+    heuristic_state: StudentWorkState,
+    sketch: dict,
+) -> str | None:
+    target_block = sketch.get("target")
+    if not isinstance(target_block, dict):
+        return heuristic_state.selected_target_ref
+    selected_ref = target_block.get("selected_ref")
+    return str(selected_ref).strip() if isinstance(selected_ref, str) and str(selected_ref).strip() else None
+
+
+def _build_student_semantic_facts_from_sketch(sketch: dict) -> list[StudentSemanticFact]:
+    fact_blocks = sketch.get("semantic_facts", [])
+    if fact_blocks is None:
+        return []
+    if not isinstance(fact_blocks, list):
+        raise ValueError("semantic_facts must be a list when provided")
+
+    semantic_facts: list[StudentSemanticFact] = []
+    for index, fact in enumerate(fact_blocks, start=1):
+        if not isinstance(fact, dict):
+            raise ValueError("semantic_facts must contain objects only")
+        fact_payload = {
+            "fact_id": fact.get("fact_id") or f"student_fact_{index}",
+            "label": fact.get("label") or fact.get("surface_text"),
+            "value": fact.get("value"),
+            "grounding": fact.get("grounding"),
+            "confidence": float(fact.get("confidence", 0.0)),
+            "notes": list(fact.get("notes", [])),
+        }
+        validated_fact = StudentSemanticFact.model_validate(fact_payload)
+        if validated_fact.confidence <= 0.0:
+            validated_fact = validated_fact.model_copy(
+                update={
+                    "confidence": 0.55 if validated_fact.grounding else 0.4,
+                    "notes": list(validated_fact.notes) + ["local_semantic_fact_repair:recomputed_confidence"],
+                }
+            )
+        semantic_facts.append(validated_fact)
+    return semantic_facts
+
+
+def _is_grounded_numeric_value(
+    value: float,
+    *,
+    surface_text: str,
+    referenced_ids: list[str],
+    problem_ref_values: dict[str, float],
+    semantic_fact_values: dict[str, float],
+) -> bool:
+    if any(_is_close_number(observed, value) for observed in _observed_numbers_in_text(surface_text)):
+        return True
+
+    for ref_id in referenced_ids:
+        if ref_id in problem_ref_values and _is_close_number(problem_ref_values[ref_id], value):
+            return True
+        if ref_id in semantic_fact_values and _is_close_number(semantic_fact_values[ref_id], value):
+            return True
+    return False
+
+
+def _sanitize_student_step_payload(
+    raw_step: dict,
+    *,
+    surface_text: str,
+    referenced_ids: list[str],
+    problem_ref_values: dict[str, float],
+    semantic_fact_values: dict[str, float],
+    fallback_confidence: float,
+) -> tuple[dict, list[str]]:
+    notes = list(raw_step.get("notes", []))
+    extracted_value = raw_step.get("extracted_value")
+    if isinstance(extracted_value, (int, float)):
+        extracted_float = float(extracted_value)
+        if not _is_grounded_numeric_value(
+            extracted_float,
+            surface_text=surface_text,
+            referenced_ids=referenced_ids,
+            problem_ref_values=problem_ref_values,
+            semantic_fact_values=semantic_fact_values,
+        ):
+            extracted_value = None
+            notes.append("local_step_repair:dropped_ungrounded_extracted_value")
+        else:
+            extracted_value = extracted_float
+    else:
+        extracted_value = None if extracted_value is None else extracted_value
+
+    input_values: list[float] = []
+    for input_value in raw_step.get("input_values", []):
+        if not isinstance(input_value, (int, float)):
+            continue
+        input_float = float(input_value)
+        if _is_grounded_numeric_value(
+            input_float,
+            surface_text=surface_text,
+            referenced_ids=referenced_ids,
+            problem_ref_values=problem_ref_values,
+            semantic_fact_values=semantic_fact_values,
+        ):
+            input_values.append(input_float)
+        else:
+            notes.append("local_step_repair:dropped_ungrounded_input_value")
+
+    confidence = raw_step.get("confidence", fallback_confidence)
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError):
+        confidence = fallback_confidence
+    if confidence <= 0.0:
+        confidence = _step_confidence(raw_step.get("operation"), extracted_value, surface_text)
+        notes.append("local_step_repair:recomputed_step_confidence")
+
+    return {
+        "operation": raw_step.get("operation"),
+        "input_values": input_values,
+        "extracted_value": extracted_value,
+        "confidence": confidence,
+        "notes": notes,
+    }, notes
+
+
+def _prune_student_semantic_facts(
+    semantic_facts: list[StudentSemanticFact],
+    steps: list[StudentStepAttempt],
+) -> tuple[list[StudentSemanticFact], list[str]]:
+    referenced_fact_ids = {
+        ref_id
+        for step in steps
+        for ref_id in step.referenced_ids
+        if any(fact.fact_id == ref_id for fact in semantic_facts)
+    }
+    notes: list[str] = []
+    deduped: list[StudentSemanticFact] = []
+    seen_signatures: set[tuple[str, float | None, str]] = set()
+
+    for fact in semantic_facts:
+        if fact.fact_id not in referenced_fact_ids:
+            notes.append(f"local_semantic_fact_pruned:unreferenced:{fact.fact_id}")
+            continue
+        signature = (_normalize_text_anchor(fact.label), fact.value, _normalize_text_anchor(fact.grounding or ""))
+        if signature in seen_signatures:
+            notes.append(f"local_semantic_fact_pruned:duplicate:{fact.fact_id}")
+            continue
+        seen_signatures.add(signature)
+        deduped.append(fact)
+
+    return deduped, notes
+
+
+def _repair_selected_target_ref(
+    selected_target_ref: str | None,
+    *,
+    normalized_final_answer: float | None,
+    problem: FormalizedProblem | None,
+) -> tuple[str | None, list[str]]:
+    if problem is None or problem.target is None:
+        return selected_target_ref, []
+    if selected_target_ref is None:
+        return selected_target_ref, []
+
+    notes: list[str] = []
+    quantity_by_id = {quantity.quantity_id: quantity for quantity in problem.quantities}
+    selected_quantity = quantity_by_id.get(selected_target_ref)
+    if (
+        selected_quantity is not None
+        and normalized_final_answer is not None
+        and not _is_close_number(selected_quantity.value, normalized_final_answer)
+    ):
+        repaired_ref = problem.target.target_variable
+        if repaired_ref and repaired_ref != selected_target_ref:
+            notes.append(
+                f"local_target_repair:retargeted_selected_ref:{selected_target_ref}->{repaired_ref}"
+            )
+            return repaired_ref, notes
+
+    return selected_target_ref, notes
+
+
+def _resolve_step_surface_text(
     raw_answer: str,
     heuristic_state: StudentWorkState,
-    skeleton: dict,
+    step_payload: dict,
+    step_index: int,
+) -> str:
+    candidate = step_payload.get("surface_text")
+    if isinstance(candidate, str) and candidate.strip():
+        normalized_candidate = _normalize_text_anchor(candidate)
+        normalized_answer = _normalize_text_anchor(raw_answer)
+        if normalized_candidate and normalized_candidate in normalized_answer:
+            return candidate.strip()
+        raise ValueError(f"trace_steps[{step_index}] surface_text is not grounded in the student answer")
+
+    if step_index < len(heuristic_state.steps):
+        return heuristic_state.steps[step_index].raw_text
+
+    raise ValueError(f"trace_steps[{step_index}] is missing grounded surface_text")
+
+
+def _build_student_steps_from_sketch(
+    raw_answer: str,
+    heuristic_state: StudentWorkState,
+    sketch: dict,
+    *,
+    allowed_problem_refs: set[str],
+    semantic_fact_ids: set[str],
+    problem: FormalizedProblem | None,
+    semantic_fact_values: dict[str, float],
+) -> list[StudentStepAttempt]:
+    requested_mode = StudentWorkMode(sketch.get("mode", heuristic_state.mode))
+    trace_steps = sketch.get("trace_steps", [])
+    if trace_steps is None:
+        trace_steps = []
+    if not isinstance(trace_steps, list):
+        raise ValueError("trace_steps must be a list when provided")
+    if not trace_steps:
+        if requested_mode in {StudentWorkMode.FINAL_ANSWER_ONLY, StudentWorkMode.UNPARSEABLE}:
+            return []
+        raise ValueError("trace_steps must be provided for partial/full trace modes")
+    compiled_steps: list[StudentStepAttempt] = []
+    problem_ref_values = _known_problem_ref_values(problem)
+    for index, raw_step in enumerate(trace_steps, start=1):
+        if not isinstance(raw_step, dict):
+            raise ValueError("trace_steps must contain objects only")
+
+        referenced_ids = [
+            ref_id
+            for ref_id in raw_step.get("referenced_ids", [])
+            if isinstance(ref_id, str) and ref_id in allowed_problem_refs.union(semantic_fact_ids)
+        ]
+        deduped_refs: list[str] = []
+        seen_refs: set[str] = set()
+        for ref_id in referenced_ids:
+            if ref_id not in seen_refs:
+                deduped_refs.append(ref_id)
+                seen_refs.add(ref_id)
+
+        surface_text = _resolve_step_surface_text(raw_answer, heuristic_state, raw_step, index - 1)
+        sanitized_step_payload, _ = _sanitize_student_step_payload(
+            raw_step,
+            surface_text=surface_text,
+            referenced_ids=deduped_refs,
+            problem_ref_values=problem_ref_values,
+            semantic_fact_values=semantic_fact_values,
+            fallback_confidence=heuristic_state.confidence or 0.0,
+        )
+        step_payload = {
+            "step_id": f"student_step_{index}",
+            "raw_text": surface_text,
+            "operation": sanitized_step_payload["operation"],
+            "input_values": sanitized_step_payload["input_values"],
+            "extracted_value": sanitized_step_payload["extracted_value"],
+            "referenced_ids": deduped_refs,
+            "confidence": sanitized_step_payload["confidence"],
+            "notes": sanitized_step_payload["notes"],
+        }
+        compiled_steps.append(StudentStepAttempt.model_validate(step_payload))
+
+    return compiled_steps
+
+
+def _build_student_work_from_sketch(
+    raw_answer: str,
+    heuristic_state: StudentWorkState,
+    sketch: dict,
     problem: FormalizedProblem | None = None,
 ) -> StudentWorkState:
-    allowed_refs = set(_allowed_student_refs(problem))
-    heuristic_steps_by_id = {step.step_id: step for step in heuristic_state.steps}
+    allowed_problem_refs = set(_allowed_student_refs(problem))
+    requested_mode = StudentWorkMode(sketch.get("mode", heuristic_state.mode))
+    all_semantic_facts = _build_student_semantic_facts_from_sketch(sketch)
+    semantic_fact_ids = {fact.fact_id for fact in all_semantic_facts}
+    semantic_fact_values = {
+        fact.fact_id: fact.value for fact in all_semantic_facts if fact.value is not None
+    }
+    steps = _build_student_steps_from_sketch(
+        raw_answer,
+        heuristic_state,
+        sketch,
+        allowed_problem_refs=allowed_problem_refs,
+        semantic_fact_ids=semantic_fact_ids,
+        problem=problem,
+        semantic_fact_values=semantic_fact_values,
+    )
+    semantic_facts, semantic_fact_notes = _prune_student_semantic_facts(all_semantic_facts, steps)
+    final_answer_block = sketch.get("final_answer")
+    normalized_final_answer = heuristic_state.normalized_final_answer
+    if isinstance(final_answer_block, dict) and "value" in final_answer_block:
+        normalized_final_answer = final_answer_block.get("value")
+    if isinstance(normalized_final_answer, int):
+        normalized_final_answer = float(normalized_final_answer)
 
-    steps = list(heuristic_state.steps)
-    step_updates = skeleton.get("step_updates", [])
-    if step_updates is not None:
-        if not isinstance(step_updates, list):
-            raise ValueError("step_updates must be a list when provided")
-        merged_steps: list[StudentStepAttempt] = []
-        seen_step_ids: set[str] = set()
-        for step in heuristic_state.steps:
-            update = next(
-                (
-                    candidate
-                    for candidate in step_updates
-                    if isinstance(candidate, dict) and candidate.get("step_id") == step.step_id
-                ),
-                None,
-            )
-            if update is None:
-                merged_steps.append(step)
-                seen_step_ids.add(step.step_id)
-                continue
+    selected_target_ref = _build_student_target_from_sketch(heuristic_state, sketch)
+    selected_target_ref, target_repair_notes = _repair_selected_target_ref(
+        selected_target_ref,
+        normalized_final_answer=normalized_final_answer,
+        problem=problem,
+    )
+    requested_mode, mode_repair_notes = _reconcile_student_mode(
+        requested_mode,
+        steps=steps,
+        normalized_final_answer=normalized_final_answer,
+    )
 
-            sanitized_update = dict(update)
-            sanitized_update.pop("raw_text", None)
-            sanitized_update["step_id"] = step.step_id
-            if "referenced_ids" in sanitized_update:
-                referenced_ids = [
-                    ref_id
-                    for ref_id in sanitized_update["referenced_ids"]
-                    if isinstance(ref_id, str) and ref_id in allowed_refs
-                ]
-                deduped_refs: list[str] = []
-                seen_refs: set[str] = set()
-                for ref_id in referenced_ids:
-                    if ref_id not in seen_refs:
-                        deduped_refs.append(ref_id)
-                        seen_refs.add(ref_id)
-                sanitized_update["referenced_ids"] = deduped_refs
-
-            merged_steps.append(step.model_copy(update=sanitized_update))
-            seen_step_ids.add(step.step_id)
-
-        unknown_step_ids = [
-            item.get("step_id")
-            for item in step_updates
-            if isinstance(item, dict)
-            and item.get("step_id") is not None
-            and item.get("step_id") not in heuristic_steps_by_id
-        ]
-        if unknown_step_ids:
-            raise ValueError(f"step_updates contained unknown step_id values: {unknown_step_ids}")
-        steps = merged_steps
+    overall_confidence = sketch.get("confidence", heuristic_state.confidence)
+    try:
+        overall_confidence = float(overall_confidence)
+    except (TypeError, ValueError):
+        overall_confidence = heuristic_state.confidence
+    repair_notes: list[str] = []
+    if overall_confidence <= 0.0:
+        inferred_confidence = heuristic_state.confidence
+        if inferred_confidence <= 0.0:
+            inferred_confidence = 0.6 if normalized_final_answer is not None else 0.35
+        overall_confidence = inferred_confidence
+        repair_notes.append("local_student_repair:recomputed_confidence")
 
     merged_payload = heuristic_state.model_dump(mode="json")
     merged_payload.update(
         {
             "raw_answer": (raw_answer or "").strip(),
-            "normalized_final_answer": skeleton.get(
-                "normalized_final_answer",
-                heuristic_state.normalized_final_answer,
-            ),
-            "mode": skeleton.get("mode", heuristic_state.mode),
+            "normalized_final_answer": normalized_final_answer,
+            "mode": requested_mode,
+            "semantic_facts": [fact.model_dump(mode="json") for fact in semantic_facts],
             "steps": [step.model_dump(mode="json") for step in steps],
-            "selected_target_ref": skeleton.get("selected_target_ref", heuristic_state.selected_target_ref),
-            "assumptions": list(skeleton.get("assumptions", heuristic_state.assumptions)),
-            "confidence": float(skeleton.get("confidence", heuristic_state.confidence)),
-            "notes": list(heuristic_state.notes) + list(skeleton.get("notes", [])),
+            "selected_target_ref": selected_target_ref,
+            "assumptions": list(sketch.get("assumptions", heuristic_state.assumptions)),
+            "confidence": overall_confidence,
+            "notes": list(heuristic_state.notes)
+            + list(sketch.get("notes", []))
+            + semantic_fact_notes
+            + target_repair_notes,
             "student_graph": None,
         }
     )
+    merged_payload["notes"] = list(merged_payload["notes"]) + repair_notes + mode_repair_notes + ["llm_student_parse_used"]
 
     selected_target_ref = merged_payload.get("selected_target_ref")
-    if selected_target_ref is not None and selected_target_ref not in allowed_refs:
+    if selected_target_ref is not None and selected_target_ref not in allowed_problem_refs:
         raise ValueError(f"selected_target_ref '{selected_target_ref}' is not in allowed_refs")
 
     try:
@@ -353,7 +653,7 @@ def _build_student_work_from_skeleton(
     except ValidationError as exc:
         raise exc
 
-    return _attach_student_graph(merged_state, problem=problem)
+    return _attach_student_graph(merged_state, problem=problem, provenance_override=ProvenanceSource.LLM)
 
 
 def _allowed_student_refs(problem: FormalizedProblem | None) -> list[str]:

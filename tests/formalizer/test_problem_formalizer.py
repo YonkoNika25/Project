@@ -1,5 +1,5 @@
 from src.formalizer import build_reference_trace, formalize_problem
-from src.models import OperationType, ProblemGraphNodeType, ProvenanceSource, QuantitySemanticRole, RelationType
+from src.models import OperationType, ProblemGraphNodeType, ProvenanceSource, RelationType
 
 
 def test_formalize_problem_extracts_target_quantities_and_relation():
@@ -12,9 +12,9 @@ def test_formalize_problem_extracts_target_quantities_and_relation():
     assert formalized.target is not None
     assert formalized.target.surface_text == "How much did Mr. Benson pay in all?"
     assert len(formalized.quantities) == 4
-    assert any(q.semantic_role == QuantitySemanticRole.UNIT_RATE for q in formalized.quantities)
-    assert any(q.semantic_role == QuantitySemanticRole.PERCENT for q in formalized.quantities)
-    assert any(q.semantic_role == QuantitySemanticRole.THRESHOLD for q in formalized.quantities)
+    assert any("role_hints=rate_like" in note for q in formalized.quantities for note in q.notes)
+    assert any("role_hints=percent_like,rate_like" in note for q in formalized.quantities for note in q.notes)
+    assert any("role_hints=threshold_like" in note for q in formalized.quantities for note in q.notes)
     assert formalized.relation_candidates[0].relation_type == RelationType.RATE_UNIT_RELATION
     assert formalized.provenance == ProvenanceSource.HEURISTIC
     assert formalized.confidence > 0.5
@@ -65,6 +65,7 @@ def test_shared_reference_trace_builder_remains_available():
 def test_formalize_problem_attaches_target_quantity_when_explicit():
     formalized = formalize_problem("There are 8 apples. How many apples are there?")
     assert formalized.target is not None
-    assert formalized.target.target_quantity_id is not None
+    assert formalized.target.target_quantity_id is None
+    assert any(note == "target_link_candidates_extracted=2" for note in formalized.notes)
     assert formalized.problem_graph is not None
     assert any(node.node_type == ProblemGraphNodeType.TARGET for node in formalized.problem_graph.nodes)

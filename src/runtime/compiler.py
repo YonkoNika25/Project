@@ -26,6 +26,36 @@ def _first_quantity_with_role(
     return next((quantity for quantity in quantities if quantity.semantic_role == role), None)
 
 
+def _quantity_has_role_hint(quantity: QuantityAnnotation, hint: str) -> bool:
+    return any(note == f"role_hints={hint}" or f",{hint}" in note or note.endswith(f"={hint}") for note in quantity.notes)
+
+
+def _quantity_has_unit_candidate(quantity: QuantityAnnotation, candidate: str) -> bool:
+    normalized = candidate.strip().lower()
+    if not normalized:
+        return False
+    return any(
+        note.startswith("unit_candidates=")
+        and normalized in {item.strip().lower() for item in note.split("=", 1)[-1].split(",") if item.strip()}
+        for note in quantity.notes
+    )
+
+
+def _resolved_relation(problem: FormalizedProblem) -> RelationCandidate | None:
+    if not problem.relation_candidates:
+        return None
+    primary = problem.relation_candidates[0]
+    if primary.provenance != ProvenanceSource.HEURISTIC:
+        return primary
+    if primary.relation_type == RelationType.UNKNOWN or primary.confidence < 0.55:
+        return None
+    if len(problem.relation_candidates) > 1:
+        runner_up = problem.relation_candidates[1]
+        if runner_up.confidence >= primary.confidence - 0.1:
+            return None
+    return primary
+
+
 def _base_quantities(quantities: Iterable[QuantityAnnotation]) -> list[QuantityAnnotation]:
     return [quantity for quantity in quantities if quantity.semantic_role == QuantitySemanticRole.BASE]
 
@@ -43,6 +73,8 @@ def _select_rate_unit_price_quantity(problem: FormalizedProblem) -> QuantityAnno
         quantity
         for quantity in problem.quantities
         if quantity.semantic_role == QuantitySemanticRole.UNIT_RATE
+        or _quantity_has_role_hint(quantity, "rate_like")
+        or "$" in quantity.surface_text
     ]
     if not candidates:
         return None
@@ -60,7 +92,13 @@ def _select_rate_unit_base_quantity(problem: FormalizedProblem) -> QuantityAnnot
         return base_candidates[0]
 
     for quantity in problem.quantities:
-        if quantity.semantic_role in (QuantitySemanticRole.PERCENT, QuantitySemanticRole.THRESHOLD):
+        if (
+            quantity.semantic_role in (QuantitySemanticRole.PERCENT, QuantitySemanticRole.THRESHOLD)
+            or _quantity_has_role_hint(quantity, "percent_like")
+            or _quantity_has_role_hint(quantity, "threshold_like")
+            or "$" in quantity.surface_text
+            or "%" in quantity.surface_text
+        ):
             continue
         if target_unit is not None and quantity.unit == target_unit:
             continue
@@ -161,8 +199,14 @@ def _compile_rate_plan(problem: FormalizedProblem, relation: RelationCandidate) 
     quantities = list(problem.quantities)
     target_ref = _target_ref(problem)
     unit_rate = _select_rate_unit_price_quantity(problem)
-    percent = _first_quantity_with_role(quantities, QuantitySemanticRole.PERCENT)
-    threshold = _first_quantity_with_role(quantities, QuantitySemanticRole.THRESHOLD)
+    percent = _first_quantity_with_role(quantities, QuantitySemanticRole.PERCENT) or next(
+        (quantity for quantity in quantities if _quantity_has_role_hint(quantity, "percent_like") or "%" in quantity.surface_text),
+        None,
+    )
+    threshold = _first_quantity_with_role(quantities, QuantitySemanticRole.THRESHOLD) or next(
+        (quantity for quantity in quantities if _quantity_has_role_hint(quantity, "threshold_like")),
+        None,
+    )
     base = _select_rate_unit_base_quantity(problem)
 
     notes = ["compiled_from_rate_unit_relation"]
@@ -432,7 +476,7 @@ def compile_executable_plan(problem: FormalizedProblem) -> ExecutablePlan:
     if graph_plan is not None:
         return graph_plan
 
-    relation = problem.relation_candidates[0] if problem.relation_candidates else None
+    relation = _resolved_relation(problem)
     relation_type = relation.relation_type if relation is not None else RelationType.UNKNOWN
 
     if relation_type == RelationType.RATE_UNIT_RELATION:

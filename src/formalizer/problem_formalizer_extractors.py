@@ -1,4 +1,4 @@
-"""Low-level parsing and heuristic extraction helpers for problem formalization."""
+"""Low-level surface evidence extraction helpers for problem formalization."""
 from __future__ import annotations
 
 import re
@@ -126,6 +126,25 @@ _UNIT_STOPWORDS = {
     "with",
 }
 
+_VERBAL_NUMBER_CUES = {
+    "one": 1.0,
+    "two": 2.0,
+    "three": 3.0,
+    "four": 4.0,
+    "five": 5.0,
+    "six": 6.0,
+    "seven": 7.0,
+    "eight": 8.0,
+    "nine": 9.0,
+    "ten": 10.0,
+    "hundred": 100.0,
+    "double": 2.0,
+    "twice": 2.0,
+    "triple": 3.0,
+    "half": 0.5,
+    "quarter": 0.25,
+}
+
 
 def _split_sentences(text: str) -> list[tuple[str, int, int]]:
     sentences: list[tuple[str, int, int]] = []
@@ -138,32 +157,6 @@ def _split_sentences(text: str) -> list[tuple[str, int, int]]:
     return sentences
 
 
-def _extract_target_text(problem_text: str) -> str:
-    text = (problem_text or "").strip()
-    if not text:
-        return ""
-
-    question_match = _TARGET_QUESTION_PATTERN.search(text)
-    if question_match:
-        return question_match.group(1).strip()
-
-    question_index = text.rfind("?")
-    if question_index != -1:
-        prefix = text[:question_index]
-        sentence_start = 0
-        for marker in (". ", "! ", "? ", "; ", ": "):
-            marker_index = prefix.rfind(marker)
-            if marker_index != -1:
-                sentence_start = max(sentence_start, marker_index + len(marker))
-        candidate = text[sentence_start:question_index + 1].strip()
-        if candidate:
-            return candidate
-        return text[:question_index + 1].strip()
-
-    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
-    return parts[-1] if parts else text
-
-
 def _slugify(text: str, fallback: str = "target") -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", (text or "").lower()).strip("_")
     return slug or fallback
@@ -174,43 +167,66 @@ def _matching_cues(text: str, cues: Iterable[str]) -> list[str]:
     return [cue for cue in cues if cue in lowered]
 
 
-def _infer_relation_and_operation(problem_text: str, target_text: str = "") -> tuple[RelationType, OperationType, list[str]]:
-    combined_text = f"{problem_text} {target_text}".strip().lower()
-    add_matches = _matching_cues(combined_text, _ADDITIVE_CUES)
-    sub_matches = _matching_cues(combined_text, _SUBTRACTIVE_CUES)
-    mult_matches = _matching_cues(combined_text, _MULTIPLICATIVE_CUES)
-    partition_matches = _matching_cues(combined_text, _PARTITION_CUES)
-    rate_matches = _matching_cues(combined_text, _RATE_CUES)
+def _extract_target_text(problem_text: str) -> str:
+    candidates = _extract_target_span_candidates(problem_text)
+    return candidates[0]["surface_text"] if candidates else ""
 
-    notes: list[str] = []
-    if add_matches:
-        notes.append("additive_cues=" + ",".join(add_matches))
-    if sub_matches:
-        notes.append("subtractive_cues=" + ",".join(sub_matches))
-    if mult_matches:
-        notes.append("multiplicative_cues=" + ",".join(mult_matches))
-    if partition_matches:
-        notes.append("partition_cues=" + ",".join(partition_matches))
-    if rate_matches:
-        notes.append("rate_cues=" + ",".join(rate_matches))
 
-    expected_operation = OperationType.UNKNOWN
-    if len(add_matches) > len(sub_matches):
-        expected_operation = OperationType.ADDITIVE
-    elif len(sub_matches) > len(add_matches):
-        expected_operation = OperationType.SUBTRACTIVE
+def _extract_target_span_candidates(problem_text: str) -> list[dict]:
+    text = (problem_text or "").strip()
+    if not text:
+        return []
 
-    if rate_matches:
-        return RelationType.RATE_UNIT_RELATION, expected_operation, notes
-    if partition_matches:
-        return RelationType.PARTITION_GROUPING, expected_operation, notes
-    if mult_matches:
-        return RelationType.MULTIPLICATIVE_SCALING, expected_operation, notes
-    if expected_operation == OperationType.ADDITIVE:
-        return RelationType.ADDITIVE_COMPOSITION, expected_operation, notes
-    if expected_operation == OperationType.SUBTRACTIVE:
-        return RelationType.SUBTRACTIVE_COMPARISON, expected_operation, notes
-    return RelationType.UNKNOWN, expected_operation, notes
+    candidates: list[dict] = []
+    seen_spans: set[tuple[int, int]] = set()
+    sentences = _split_sentences(text)
+
+    def _append_candidate(surface_text: str, start: int, end: int, rule_source: str) -> None:
+        span = (start, end)
+        if span in seen_spans:
+            return
+        seen_spans.add(span)
+        unit_candidate = None
+        lowered = surface_text.lower()
+        if "how much" in lowered:
+            unit_candidate = "dollars"
+        elif "how many" in lowered:
+            words = re.findall(r"[A-Za-z]+", surface_text)
+            for index, word in enumerate(words):
+                if word.lower() == "many" and index + 1 < len(words):
+                    unit_candidate = words[index + 1].lower()
+                    break
+        candidates.append(
+            {
+                "surface_text": surface_text.strip(),
+                "normalized_question": surface_text.strip(),
+                "target_variable": _slugify(surface_text, fallback="answer"),
+                "unit_candidate": unit_candidate,
+                "char_start": start,
+                "char_end": end,
+                "rule_source": rule_source,
+                "confidence": 0.9 if rule_source == "matched_wh_question" else 0.65,
+            }
+        )
+
+    question_match = _TARGET_QUESTION_PATTERN.search(text)
+    if question_match:
+        _append_candidate(
+            question_match.group(1).strip(),
+            question_match.start(1),
+            question_match.end(1),
+            "matched_wh_question",
+        )
+
+    for sentence, start, end in sentences:
+        if "?" in sentence:
+            _append_candidate(sentence.strip(), start, end, "question_sentence")
+
+    if sentences:
+        sentence, start, end = sentences[-1]
+        _append_candidate(sentence.strip(), start, end, "final_sentence_fallback")
+
+    return candidates
 
 
 def _extract_entities(problem_text: str) -> list[ProblemEntity]:
@@ -232,6 +248,415 @@ def _extract_entities(problem_text: str) -> list[ProblemEntity]:
             )
         )
     return entities
+
+
+def _extract_unit_candidates(surface: str, left_context: str, right_context: str, target_candidates: list[dict]) -> list[str]:
+    if "$" in surface:
+        return ["dollars"]
+    if "%" in surface:
+        return ["percent"]
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _push(candidate: str) -> None:
+        normalized = candidate.strip().lower()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append(normalized)
+
+    right_words = re.findall(r"[A-Za-z]+", right_context)
+    collected: list[str] = []
+    for word in right_words:
+        lowered = word.lower()
+        if lowered in _UNIT_STOPWORDS:
+            if collected:
+                break
+            continue
+        collected.append(lowered)
+        if len(collected) >= 3:
+            break
+    if collected:
+        for size in range(1, min(len(collected), 3) + 1):
+            _push(" ".join(collected[:size]))
+
+    left_words = re.findall(r"[A-Za-z]+", left_context)
+    reversed_collected: list[str] = []
+    for word in reversed(left_words):
+        lowered = word.lower()
+        if lowered in _UNIT_STOPWORDS:
+            if reversed_collected:
+                break
+            continue
+        reversed_collected.append(lowered)
+        if len(reversed_collected) >= 2:
+            break
+    if reversed_collected:
+        _push(" ".join(reversed(reversed_collected)))
+
+    for target_candidate in target_candidates:
+        unit_candidate = target_candidate.get("unit_candidate")
+        if isinstance(unit_candidate, str):
+            _push(unit_candidate)
+
+    return candidates
+
+
+def _extract_role_hints(surface: str, local_context: str, target_candidates: list[dict]) -> list[str]:
+    hints: list[str] = []
+    lowered_context = local_context.lower()
+
+    def _add_hint(hint: str) -> None:
+        if hint not in hints:
+            hints.append(hint)
+
+    if "%" in surface or "percent" in lowered_context:
+        _add_hint("percent_like")
+    if any(cue in lowered_context for cue in _THRESHOLD_CUES):
+        _add_hint("threshold_like")
+    if any(cue in lowered_context for cue in _RATE_CUES) or "$" in surface:
+        _add_hint("rate_like")
+    if any(surface in candidate["surface_text"] for candidate in target_candidates if candidate.get("surface_text")):
+        _add_hint("target_overlap")
+
+    return hints
+
+
+def _extract_numeric_mentions(problem_text: str, target_candidates: list[dict]) -> list[dict]:
+    mentions: list[dict] = []
+    sentences = _split_sentences(problem_text)
+
+    for idx, match in enumerate(_NUMBER_PATTERN.finditer(problem_text or ""), start=1):
+        surface = match.group(0)
+        normalized = surface.replace("$", "").replace("%", "").replace(",", "")
+        try:
+            value = float(normalized)
+        except ValueError:
+            continue
+
+        sentence_index = None
+        for s_idx, (_, start, end) in enumerate(sentences):
+            if start <= match.start() < end:
+                sentence_index = s_idx
+                break
+
+        left_context = (problem_text[max(0, match.start() - 25):match.start()] or "").strip()
+        right_context = (problem_text[match.end():match.end() + 30] or "").strip()
+        local_context = problem_text[max(0, match.start() - 25):match.end() + 35]
+
+        mentions.append(
+            {
+                "mention_id": f"quantity_{idx}",
+                "surface_text": surface,
+                "value": value,
+                "sentence_index": sentence_index,
+                "char_start": match.start(),
+                "char_end": match.end(),
+                "left_context": left_context,
+                "right_context": right_context,
+                "local_context": local_context.strip(),
+                "unit_candidates": _extract_unit_candidates(surface, left_context, right_context, target_candidates),
+                "role_hints": _extract_role_hints(surface, local_context, target_candidates),
+                "rule_source": "numeric_regex",
+            }
+        )
+
+    return mentions
+
+
+def _extract_implicit_quantity_cues(problem_text: str) -> list[dict]:
+    lowered = (problem_text or "").lower()
+    cues: list[dict] = []
+    seen_spans: set[tuple[int, int]] = set()
+    for token, value in _VERBAL_NUMBER_CUES.items():
+        pattern = re.compile(rf"\b{re.escape(token)}\b")
+        for match in pattern.finditer(lowered):
+            span = (match.start(), match.end())
+            if span in seen_spans:
+                continue
+            seen_spans.add(span)
+            cues.append(
+                {
+                    "cue_id": f"implicit_cue_{len(cues) + 1}",
+                    "surface_text": problem_text[match.start():match.end()],
+                    "value_hint": value,
+                    "char_start": match.start(),
+                    "char_end": match.end(),
+                    "cue_type": "verbal_number" if token not in {"double", "twice", "triple", "half", "quarter"} else "multiplicative",
+                    "rule_source": "mini_lexicon",
+                }
+            )
+    return cues
+
+
+def _extract_lexical_cue_hits(problem_text: str, target_text: str = "") -> list[dict]:
+    combined_text = f"{problem_text} {target_text}".strip().lower()
+    cue_families = (
+        ("additive", _ADDITIVE_CUES),
+        ("subtractive", _SUBTRACTIVE_CUES),
+        ("multiplicative", _MULTIPLICATIVE_CUES),
+        ("partition", _PARTITION_CUES),
+        ("rate", _RATE_CUES),
+        ("threshold", _THRESHOLD_CUES),
+    )
+
+    hits: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for family, cues in cue_families:
+        for cue in _matching_cues(combined_text, cues):
+            key = (family, cue)
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append(
+                {
+                    "family": family,
+                    "cue": cue,
+                    "rule_source": "cue_lookup",
+                }
+            )
+    return hits
+
+
+def _build_relation_candidates_from_cues(
+    problem_text: str,
+    target_candidates: list[dict],
+    numeric_mentions: list[dict],
+    lexical_cues: list[dict],
+) -> list[dict]:
+    family_to_relation = {
+        "additive": (RelationType.ADDITIVE_COMPOSITION, OperationType.ADDITIVE),
+        "subtractive": (RelationType.SUBTRACTIVE_COMPARISON, OperationType.SUBTRACTIVE),
+        "multiplicative": (RelationType.MULTIPLICATIVE_SCALING, OperationType.UNKNOWN),
+        "partition": (RelationType.PARTITION_GROUPING, OperationType.UNKNOWN),
+        "rate": (RelationType.RATE_UNIT_RELATION, OperationType.UNKNOWN),
+    }
+    family_hits: dict[str, list[str]] = {}
+    for hit in lexical_cues:
+        family = hit["family"]
+        family_hits.setdefault(family, []).append(hit["cue"])
+
+    target_variable = target_candidates[0]["target_variable"] if target_candidates else "answer"
+    quantity_ids = [mention["mention_id"] for mention in numeric_mentions]
+    candidates: list[dict] = []
+    for family, cues in family_hits.items():
+        if family not in family_to_relation:
+            continue
+        relation_type, operation_hint = family_to_relation[family]
+        candidates.append(
+            {
+                "relation_id": f"relation_candidate_{len(candidates) + 1}",
+                "relation_type": relation_type.value,
+                "operation_hint": operation_hint.value,
+                "source_quantity_ids": quantity_ids,
+                "target_variable": target_variable,
+                "expression": None,
+                "rationale": f"Lexical cues suggest the {family} relation family.",
+                "confidence": min(0.45 + (0.12 * len(cues)), 0.82),
+                "cue_family": family,
+                "matched_cues": cues,
+            }
+        )
+
+    if not candidates and len(numeric_mentions) == 1:
+        candidates.append(
+            {
+                "relation_id": "relation_candidate_1",
+                "relation_type": RelationType.UNKNOWN.value,
+                "operation_hint": OperationType.UNKNOWN.value,
+                "source_quantity_ids": quantity_ids,
+                "target_variable": target_variable,
+                "expression": f"{target_variable} = {quantity_ids[0]}",
+                "rationale": "Single visible numeric mention may itself answer the question.",
+                "confidence": 0.4,
+                "cue_family": "single_quantity_fallback",
+                "matched_cues": [],
+            }
+        )
+
+    return sorted(candidates, key=lambda item: item["confidence"], reverse=True)
+
+
+def _build_target_link_candidates(target_candidates: list[dict], numeric_mentions: list[dict]) -> list[dict]:
+    candidates: list[dict] = []
+    for target_candidate in target_candidates:
+        target_text = target_candidate["surface_text"].lower()
+        target_unit = str(target_candidate.get("unit_candidate") or "").lower()
+        for mention in numeric_mentions:
+            reasons: list[str] = []
+            unit_candidates = [str(candidate).lower() for candidate in mention.get("unit_candidates", [])]
+            if mention["surface_text"].lower() in target_text:
+                reasons.append("surface_overlap")
+            if target_unit and any(target_unit in candidate for candidate in unit_candidates):
+                reasons.append("unit_overlap")
+            if not reasons:
+                continue
+            candidates.append(
+                {
+                    "target_variable": target_candidate["target_variable"],
+                    "quantity_id": mention["mention_id"],
+                    "reasons": reasons,
+                    "confidence": 0.4 + (0.2 * len(reasons)),
+                }
+            )
+    return candidates
+
+
+def _build_problem_anchor_evidence(problem_text: str) -> dict:
+    cleaned_text = (problem_text or "").strip()
+    sentence_spans = [
+        {
+            "sentence_index": index,
+            "surface_text": sentence,
+            "char_start": start,
+            "char_end": end,
+        }
+        for index, (sentence, start, end) in enumerate(_split_sentences(cleaned_text))
+    ]
+    target_candidates = _extract_target_span_candidates(cleaned_text)
+    numeric_mentions = _extract_numeric_mentions(cleaned_text, target_candidates)
+    implicit_quantity_cues = _extract_implicit_quantity_cues(cleaned_text)
+    lexical_cues = _extract_lexical_cue_hits(
+        cleaned_text,
+        target_candidates[0]["surface_text"] if target_candidates else "",
+    )
+    relation_candidates = _build_relation_candidates_from_cues(
+        cleaned_text,
+        target_candidates,
+        numeric_mentions,
+        lexical_cues,
+    )
+    target_link_candidates = _build_target_link_candidates(target_candidates, numeric_mentions)
+    entities = _extract_entities(cleaned_text)
+
+    return {
+        "problem_text": cleaned_text,
+        "sentence_spans": sentence_spans,
+        "numeric_mentions": numeric_mentions,
+        "implicit_quantity_cues": implicit_quantity_cues,
+        "lexical_cues": lexical_cues,
+        "target_span_candidates": target_candidates,
+        "target_link_candidates": target_link_candidates,
+        "relation_candidates": relation_candidates,
+        "entity_candidates": [
+            {
+                "entity_id": entity.entity_id,
+                "surface_text": entity.surface_text,
+                "normalized_name": entity.normalized_name,
+                "entity_type": entity.entity_type,
+            }
+            for entity in entities
+        ],
+    }
+
+
+def _project_quantities_from_evidence(evidence_pack: dict) -> list[QuantityAnnotation]:
+    quantities: list[QuantityAnnotation] = []
+    for mention in evidence_pack.get("numeric_mentions", []):
+        surface_text = str(mention.get("surface_text", ""))
+        unit_candidates = [str(candidate) for candidate in mention.get("unit_candidates", []) if str(candidate).strip()]
+        role_hints = [str(hint) for hint in mention.get("role_hints", []) if str(hint).strip()]
+
+        quantity_notes = [
+            f"unit_candidates={','.join(unit_candidates)}" if unit_candidates else "unit_candidates=",
+            f"role_hints={','.join(role_hints)}" if role_hints else "role_hints=",
+            f"rule_source={mention.get('rule_source', 'unknown')}",
+        ]
+        if mention.get("local_context"):
+            quantity_notes.append(f"context={mention['local_context']}")
+
+        quantities.append(
+            QuantityAnnotation(
+                quantity_id=str(mention["mention_id"]),
+                surface_text=surface_text,
+                value=float(mention["value"]),
+                unit=None,
+                semantic_role=QuantitySemanticRole.UNKNOWN,
+                sentence_index=mention.get("sentence_index"),
+                char_start=mention.get("char_start"),
+                char_end=mention.get("char_end"),
+                is_target_candidate=False,
+                provenance=ProvenanceSource.PROBLEM_TEXT,
+                notes=quantity_notes,
+            )
+        )
+    return quantities
+
+
+def _project_target_from_evidence(evidence_pack: dict) -> Optional[TargetSpec]:
+    candidates = evidence_pack.get("target_span_candidates", [])
+    if not candidates:
+        return None
+    target_candidate = candidates[0]
+    return TargetSpec(
+        surface_text=str(target_candidate["surface_text"]),
+        normalized_question=str(target_candidate.get("normalized_question") or target_candidate["surface_text"]),
+        target_variable=str(target_candidate["target_variable"]),
+        target_quantity_id=None,
+        unit=target_candidate.get("unit_candidate"),
+        description=str(target_candidate["surface_text"]).strip("?"),
+        provenance=ProvenanceSource.PROBLEM_TEXT,
+        confidence=float(target_candidate.get("confidence", 0.7) or 0.7),
+    )
+
+
+def _candidate_expression(
+    relation_type: RelationType,
+    quantities: list[QuantityAnnotation],
+    target_ref: str,
+) -> Optional[str]:
+    refs = [q.quantity_id for q in quantities]
+    if not refs:
+        return None
+    if relation_type == RelationType.ADDITIVE_COMPOSITION and len(refs) >= 2:
+        return f"{target_ref} = " + " + ".join(refs)
+    if relation_type == RelationType.SUBTRACTIVE_COMPARISON and len(refs) >= 2:
+        return f"{target_ref} = {refs[0]} - " + " - ".join(refs[1:])
+    if relation_type == RelationType.MULTIPLICATIVE_SCALING and len(refs) >= 2:
+        return f"{target_ref} = {refs[0]} * {refs[1]}"
+    if relation_type == RelationType.PARTITION_GROUPING and len(refs) >= 2:
+        return f"{target_ref} = {refs[0]} / {refs[1]}"
+    if relation_type == RelationType.UNKNOWN and len(refs) == 1:
+        return f"{target_ref} = {refs[0]}"
+    return None
+
+
+def _project_relation_candidates_from_evidence(
+    evidence_pack: dict,
+    quantities: list[QuantityAnnotation],
+    target: Optional[TargetSpec],
+) -> tuple[list[RelationCandidate], list[str]]:
+    relation_candidates: list[RelationCandidate] = []
+    notes: list[str] = []
+    target_variable = target.target_variable if target is not None else "answer"
+
+    for relation_candidate in evidence_pack.get("relation_candidates", []):
+        relation_type = RelationType(str(relation_candidate.get("relation_type", RelationType.UNKNOWN.value)))
+        operation_hint = OperationType(str(relation_candidate.get("operation_hint", OperationType.UNKNOWN.value)))
+        matched_cues = [str(cue) for cue in relation_candidate.get("matched_cues", []) if str(cue).strip()]
+        rationale = str(relation_candidate.get("rationale") or "Heuristic relation family candidate.")
+        if matched_cues:
+            rationale = f"{rationale} matched_cues={','.join(matched_cues)}"
+        relation_candidates.append(
+            RelationCandidate(
+                relation_id=str(relation_candidate.get("relation_id") or f"relation_{len(relation_candidates) + 1}"),
+                relation_type=relation_type,
+                operation_hint=operation_hint,
+                source_quantity_ids=[quantity.quantity_id for quantity in quantities],
+                target_variable=target_variable,
+                expression=None,
+                rationale=rationale,
+                confidence=float(relation_candidate.get("confidence", 0.35) or 0.35),
+                provenance=ProvenanceSource.HEURISTIC,
+            )
+        )
+        if matched_cues:
+            notes.append(
+                f"relation_candidate_hint:{relation_type.value}:matched_cues={','.join(matched_cues)}"
+            )
+
+    return relation_candidates, notes
 
 
 def _link_quantities_to_entities(
@@ -267,169 +692,14 @@ def _link_quantities_to_entities(
     return linked
 
 
-def _infer_unit(surface: str, right_context: str) -> Optional[str]:
-    if "$" in surface:
-        return "dollars"
-    if "%" in surface:
-        return "percent"
-    words = re.findall(r"[A-Za-z]+", right_context)
-    collected: list[str] = []
-    for word in words:
-        lowered = word.lower()
-        if lowered in _UNIT_STOPWORDS:
-            if collected:
-                break
-            continue
-        collected.append(lowered)
-        if len(collected) >= 2:
-            break
-    return " ".join(collected) if collected else None
-
-
-def _infer_semantic_role(surface: str, context: str, target_text: str) -> tuple[QuantitySemanticRole, bool]:
-    lowered_context = context.lower()
-    if "%" in surface or "percent" in lowered_context:
-        return QuantitySemanticRole.PERCENT, False
-    if any(cue in lowered_context for cue in _THRESHOLD_CUES):
-        return QuantitySemanticRole.THRESHOLD, False
-    if any(cue in lowered_context for cue in _RATE_CUES):
-        return QuantitySemanticRole.UNIT_RATE, False
-    if target_text and surface in target_text:
-        return QuantitySemanticRole.TARGET_CANDIDATE, True
-    return QuantitySemanticRole.BASE, False
+def _build_target_spec(problem_text: str, target_text: str) -> Optional[TargetSpec]:
+    evidence_pack = _build_problem_anchor_evidence(problem_text)
+    return _project_target_from_evidence(evidence_pack)
 
 
 def _extract_quantities(problem_text: str, target_text: str) -> list[QuantityAnnotation]:
-    quantities: list[QuantityAnnotation] = []
-    sentences = _split_sentences(problem_text)
-
-    for idx, match in enumerate(_NUMBER_PATTERN.finditer(problem_text or ""), start=1):
-        surface = match.group(0)
-        normalized = surface.replace("$", "").replace("%", "").replace(",", "")
-        try:
-            value = float(normalized)
-        except ValueError:
-            continue
-
-        sentence_index = None
-        sentence_text = ""
-        for s_idx, (sentence, start, end) in enumerate(sentences):
-            if start <= match.start() < end:
-                sentence_index = s_idx
-                sentence_text = sentence
-                break
-
-        right_context = (problem_text[match.end():match.end() + 30] or "").strip()
-        local_context = problem_text[max(0, match.start() - 25):match.end() + 35]
-        semantic_role, is_target_candidate = _infer_semantic_role(surface, local_context, target_text)
-        quantities.append(
-            QuantityAnnotation(
-                quantity_id=f"quantity_{idx}",
-                surface_text=surface,
-                value=value,
-                unit=_infer_unit(surface, right_context),
-                semantic_role=semantic_role,
-                sentence_index=sentence_index,
-                char_start=match.start(),
-                char_end=match.end(),
-                is_target_candidate=is_target_candidate,
-                provenance=ProvenanceSource.PROBLEM_TEXT,
-                notes=[f"context={local_context.strip()}"] if sentence_text else [],
-            )
-        )
-
-    return quantities
-
-
-def _build_target_spec(problem_text: str, target_text: str) -> Optional[TargetSpec]:
-    if not target_text:
-        return None
-    unit = None
-    lowered = target_text.lower()
-    if "how much" in lowered:
-        unit = "dollars"
-    elif "how many" in lowered:
-        words = re.findall(r"[A-Za-z]+", target_text)
-        for idx, word in enumerate(words):
-            if word.lower() == "many" and idx + 1 < len(words):
-                unit = words[idx + 1].lower()
-                break
-
-    return TargetSpec(
-        surface_text=target_text,
-        normalized_question=target_text.strip(),
-        target_variable=_slugify(target_text, fallback="answer"),
-        unit=unit,
-        description=target_text.strip("?"),
-        provenance=ProvenanceSource.PROBLEM_TEXT,
-        confidence=0.85,
-    )
-
-
-def _attach_target_quantity(
-    target: Optional[TargetSpec],
-    quantities: list[QuantityAnnotation],
-) -> Optional[TargetSpec]:
-    if target is None:
-        return None
-
-    lowered_target = target.surface_text.lower()
-    target_quantity = next(
-        (
-            quantity
-            for quantity in quantities
-            if quantity.is_target_candidate and quantity.surface_text.lower() in lowered_target
-        ),
-        None,
-    )
-    if target_quantity is None and target.unit is not None:
-        target_quantity = next(
-            (
-                quantity
-                for quantity in quantities
-                if quantity.unit is not None and target.unit in quantity.unit
-            ),
-            None,
-        )
-    if target_quantity is None:
-        return target
-
-    return target.model_copy(
-        update={
-            "target_quantity_id": target_quantity.quantity_id,
-            "entity_id": target_quantity.entity_id,
-        }
-    )
-
-
-def _candidate_expression(
-    relation_type: RelationType,
-    operation: OperationType,
-    quantities: list[QuantityAnnotation],
-    target_ref: str,
-) -> Optional[str]:
-    refs = [q.quantity_id for q in quantities]
-    if not refs:
-        return None
-    if relation_type == RelationType.RATE_UNIT_RELATION:
-        unit_rate = next((q for q in quantities if q.semantic_role == QuantitySemanticRole.UNIT_RATE), None)
-        percent = next((q for q in quantities if q.semantic_role == QuantitySemanticRole.PERCENT), None)
-        threshold = next((q for q in quantities if q.semantic_role == QuantitySemanticRole.THRESHOLD), None)
-        base = next((q for q in quantities if q.semantic_role == QuantitySemanticRole.BASE), None)
-        if unit_rate and percent and threshold and base:
-            return (
-                f"{target_ref} = ({base.quantity_id} * {unit_rate.quantity_id}) - "
-                f"(max({base.quantity_id} - {threshold.quantity_id}, 0) * "
-                f"({percent.quantity_id}/100) * {unit_rate.quantity_id})"
-            )
-        return f"{target_ref} = rate_or_percent_relation({', '.join(refs)})"
-    if relation_type == RelationType.ADDITIVE_COMPOSITION and len(refs) >= 2:
-        return f"{target_ref} = " + " + ".join(refs)
-    if relation_type == RelationType.SUBTRACTIVE_COMPARISON and len(refs) >= 2:
-        return f"{target_ref} = {refs[0]} - " + " - ".join(refs[1:])
-    if relation_type == RelationType.MULTIPLICATIVE_SCALING and len(refs) >= 2:
-        return f"{target_ref} = {refs[0]} * {refs[1]}"
-    return None
+    evidence_pack = _build_problem_anchor_evidence(problem_text)
+    return _project_quantities_from_evidence(evidence_pack)
 
 
 def _build_relation_candidates(
@@ -437,21 +707,8 @@ def _build_relation_candidates(
     target: Optional[TargetSpec],
     quantities: list[QuantityAnnotation],
 ) -> tuple[list[RelationCandidate], list[str]]:
-    target_text = target.surface_text if target is not None else ""
-    relation_type, operation_hint, notes = _infer_relation_and_operation(problem_text, target_text)
-    target_variable = target.target_variable if target is not None else "answer"
-    relation = RelationCandidate(
-        relation_id="relation_1",
-        relation_type=relation_type,
-        operation_hint=operation_hint,
-        source_quantity_ids=[q.quantity_id for q in quantities],
-        target_variable=target_variable,
-        expression=_candidate_expression(relation_type, operation_hint, quantities, target_variable),
-        rationale="Heuristic relation candidate built from problem cues and extracted quantities.",
-        confidence=0.72 if relation_type != RelationType.UNKNOWN else 0.35,
-        provenance=ProvenanceSource.HEURISTIC if relation_type != RelationType.UNKNOWN else ProvenanceSource.UNKNOWN,
-    )
-    return [relation], notes
+    evidence_pack = _build_problem_anchor_evidence(problem_text)
+    return _project_relation_candidates_from_evidence(evidence_pack, quantities, target)
 
 
 def _dedupe_quantities(quantities: list[QuantityAnnotation]) -> tuple[list[QuantityAnnotation], list[str]]:
@@ -468,4 +725,3 @@ def _dedupe_quantities(quantities: list[QuantityAnnotation]) -> tuple[list[Quant
         deduped.append(quantity)
 
     return deduped, notes
-

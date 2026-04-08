@@ -1,12 +1,15 @@
 """Structured validation for problem graphs before compilation/execution."""
 from __future__ import annotations
 
+import ast
+
 from src.models import (
     FormalizedProblem,
     GraphValidationIssue,
     GraphValidationResult,
     ProblemGraphEdgeType,
     ProblemGraphNodeType,
+    TraceOperation,
 )
 
 
@@ -27,6 +30,20 @@ def _issue(
         step_id=step_id,
         details=details,
     )
+
+
+def _is_zero_input_constant_expression(expression: str | None) -> bool:
+    if not expression or not expression.strip():
+        return False
+    try:
+        parsed = ast.parse(expression, mode="eval")
+    except SyntaxError:
+        return False
+
+    for node in ast.walk(parsed):
+        if isinstance(node, ast.Name):
+            return False
+    return True
 
 
 def validate_problem_graph(problem: FormalizedProblem) -> GraphValidationResult:
@@ -80,14 +97,17 @@ def validate_problem_graph(problem: FormalizedProblem) -> GraphValidationResult:
             key=lambda edge: edge.position if edge.position is not None else 999,
         )
         if not input_edges:
-            issues.append(
-                _issue(
-                    "operation_missing_inputs",
-                    "Operation node does not have any input edges",
-                    node_id=node.node_id,
-                    step_id=step_id,
+            if not (
+                node.operation == TraceOperation.DERIVE and _is_zero_input_constant_expression(node.expression)
+            ):
+                issues.append(
+                    _issue(
+                        "operation_missing_inputs",
+                        "Operation node does not have any input edges",
+                        node_id=node.node_id,
+                        step_id=step_id,
+                    )
                 )
-            )
 
         output_edges = [
             edge

@@ -275,7 +275,14 @@ def main() -> list[dict[str, Any]]:
     print("Student Work Debugger")
     print(f"USE_LLM = {USE_LLM}")
 
-    problem = formalize_problem(PROBLEM_TEXT)
+    base_client = build_default_llm_client() if USE_LLM else None
+    recording_client = RecordingLLMClient(base_client) if base_client is not None else None
+    print(f"LLM client available = {base_client is not None}")
+
+    problem = formalize_problem(
+        PROBLEM_TEXT,
+        llm_client=recording_client if recording_client is not None else None,
+    )
     reference = None
     reference_error: str | None = None
     try:
@@ -289,10 +296,6 @@ def main() -> list[dict[str, Any]]:
         reference=reference,
         llm_client=None,
     )
-
-    base_client = build_default_llm_client() if USE_LLM else None
-    recording_client = RecordingLLMClient(base_client) if base_client is not None else None
-    print(f"LLM client available = {base_client is not None}")
 
     final_student = (
         formalize_student_work(

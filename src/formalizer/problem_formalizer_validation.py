@@ -9,6 +9,7 @@ from src.models import (
     GraphValidationResult,
     OperationType,
     ProblemEntity,
+    ProblemGraphEdgeType,
     ProblemGraphNodeType,
     ProvenanceSource,
     QuantityAnnotation,
@@ -33,6 +34,46 @@ def _sanitize_quantity_update(quantity_update: dict) -> tuple[dict, str | None]:
             sanitized.pop("semantic_role", None)
 
     return sanitized, invalid_note
+
+
+def _sanitize_latent_quantity_payload(
+    latent_quantity: dict,
+    *,
+    existing_quantity_ids: set[str],
+) -> tuple[dict | None, str | None]:
+    quantity_id = str(latent_quantity.get("quantity_id", "")).strip()
+    if not quantity_id:
+        return None, "ignored_invalid_latent_quantity:missing_quantity_id"
+    if quantity_id in existing_quantity_ids:
+        return None, f"ignored_duplicate_latent_quantity:{quantity_id}"
+
+    surface_text = str(latent_quantity.get("surface_text", "")).strip()
+    if not surface_text:
+        return None, f"ignored_invalid_latent_quantity:{quantity_id}:missing_surface_text"
+
+    try:
+        value = float(latent_quantity.get("value"))
+    except (TypeError, ValueError):
+        return None, f"ignored_invalid_latent_quantity:{quantity_id}:non_numeric_value"
+
+    payload = {
+        "quantity_id": quantity_id,
+        "surface_text": surface_text,
+        "value": value,
+        "unit": latent_quantity.get("unit"),
+        "entity_id": latent_quantity.get("entity_id"),
+        "semantic_role": latent_quantity.get("semantic_role", QuantitySemanticRole.INTERMEDIATE.value),
+        "is_target_candidate": bool(latent_quantity.get("is_target_candidate", False)),
+        "notes": _coerce_list_of_strings(latent_quantity.get("notes")),
+    }
+
+    semantic_role = payload.get("semantic_role")
+    allowed_roles = {role.value for role in QuantitySemanticRole}
+    if semantic_role not in allowed_roles:
+        payload["semantic_role"] = QuantitySemanticRole.INTERMEDIATE.value
+        return payload, f"coerced_invalid_latent_semantic_role:{quantity_id}:{semantic_role}->intermediate"
+
+    return payload, None
 
 
 def _coerce_list_of_strings(value: object) -> list[str]:
@@ -145,12 +186,10 @@ def validate_formalized_problem(problem: FormalizedProblem) -> FormalizedProblem
         confidence += 0.15
     if target and target.provenance != ProvenanceSource.UNKNOWN:
         confidence += 0.15
-    if relation_candidates and relation_candidates[0].relation_type != RelationType.UNKNOWN:
-        confidence += 0.2
-    if any(q.semantic_role == QuantitySemanticRole.PERCENT for q in quantities):
-        notes.append("contains_percent_quantity")
-    if any(q.semantic_role == QuantitySemanticRole.THRESHOLD for q in quantities):
-        notes.append("contains_threshold_quantity")
+    if any("percent_like" in note for quantity in quantities for note in quantity.notes):
+        notes.append("contains_percent_like_evidence")
+    if any("threshold_like" in note for quantity in quantities for note in quantity.notes):
+        notes.append("contains_threshold_like_evidence")
 
     return problem.model_copy(
         update={
@@ -237,10 +276,36 @@ def _apply_local_semantic_repairs(problem: FormalizedProblem) -> FormalizedProbl
     graph_steps = _heuristic_graph_operation_steps(problem)
     target = problem.target
     quantities = list(problem.quantities)
+    quantity_by_id = {quantity.quantity_id: quantity for quantity in quantities}
 
     if graph_steps and len(graph_steps) > 1 and target.target_quantity_id is not None:
         target = target.model_copy(update={"target_quantity_id": None})
         notes.append("local_semantic_repair:cleared_target_quantity_for_derived_target")
+
+    if graph_steps and target.target_quantity_id is not None:
+        target_quantity = quantity_by_id.get(target.target_quantity_id)
+        graph_input_refs: set[str] = set()
+        graph_output_refs: set[str] = set()
+        if problem.problem_graph is not None:
+            op_node_ids = {
+                node.node_id
+                for node in problem.problem_graph.nodes
+                if node.node_type == ProblemGraphNodeType.OPERATION
+            }
+            for edge in problem.problem_graph.edges:
+                if edge.edge_type == ProblemGraphEdgeType.INPUT_TO_OPERATION:
+                    graph_input_refs.add(edge.source_node_id)
+                if edge.edge_type == ProblemGraphEdgeType.OUTPUT_FROM_OPERATION and edge.source_node_id in op_node_ids:
+                    graph_output_refs.add(edge.target_node_id)
+
+        if (
+            target_quantity is not None
+            and target_quantity.provenance == ProvenanceSource.LLM
+            and target.target_quantity_id not in graph_input_refs
+            and target.target_variable in graph_output_refs
+        ):
+            target = target.model_copy(update={"target_quantity_id": None})
+            notes.append("local_semantic_repair:cleared_answer_fact_target_quantity")
 
     lowered_target_text = target.surface_text.lower()
     repaired_quantities: list[QuantityAnnotation] = []
@@ -326,4 +391,3 @@ def _semantic_sanity_validation_result(problem: FormalizedProblem) -> GraphValid
         operation_node_count=len(graph_steps),
         notes=["semantic_sanity_checked"],
     )
-

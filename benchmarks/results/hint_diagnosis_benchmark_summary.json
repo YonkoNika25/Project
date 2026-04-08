@@ -1,0 +1,18 @@
+{
+  "sample_count": 10,
+  "unique_problem_count": 3,
+  "stage_counts": {
+    "completed": 10
+  },
+  "category_counts": {
+    "algebra_variable": 10
+  },
+  "diagnosis_counts": {
+    "target_misunderstanding": 2,
+    "arithmetic_error": 8
+  },
+  "hint_verification_failures": 0,
+  "problem_context_cache_hits": 7,
+  "final_correctness_agreement": 9,
+  "llm_enabled": true
+}

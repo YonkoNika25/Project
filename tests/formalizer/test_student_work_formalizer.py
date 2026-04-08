@@ -62,6 +62,24 @@ def test_student_work_formalizer_detects_intermediate_target_selection():
     assert final_node.value == 2.0
 
 
+def test_student_work_formalizer_splits_punctuation_without_spaces():
+    problem = formalize_problem(
+        "A deep-sea monster rises from the waters once every hundred years to feast on a ship and sate its hunger. "
+        "Over three hundred years, it has consumed 847 people. Ships have been built larger over time, so each new "
+        "ship has twice as many people as the last ship. How many people were on the ship the monster ate in the first hundred years?"
+    )
+
+    student = formalize_student_work(
+        "Let the first ship have x people.Then the next two ships had 2x and 4x people.x + 2x + 4x = 847. 7x = 847. x = 847/7. x = 117.Answer is 117.",
+        problem=problem,
+    )
+
+    assert student.mode == StudentWorkMode.PARTIAL_TRACE
+    assert len(student.steps) >= 4
+    assert student.steps[0].raw_text.startswith("Let the first ship have x people.")
+    assert student.steps[1].raw_text.startswith("Then the next two ships had 2x and 4x people.")
+
+
 def test_student_work_formalizer_marks_unparseable_answers():
     student = formalize_student_work("I do not know.")
 

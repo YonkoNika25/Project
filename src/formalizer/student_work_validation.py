@@ -1,4 +1,4 @@
-"""Validation and feedback helpers for compact student-work formalization."""
+"""Validation and feedback helpers for semantic-sketch student-work formalization."""
 from __future__ import annotations
 
 from src.models import (
@@ -33,29 +33,32 @@ def _student_sanity_validation_result(
     reference: CanonicalReference | None,
 ) -> GraphValidationResult:
     issues: list[GraphValidationIssue] = []
-    allowed_refs: set[str] = set()
+    allowed_problem_refs: set[str] = set()
 
     if problem is not None:
-        allowed_refs.update(quantity.quantity_id for quantity in problem.quantities)
+        allowed_problem_refs.update(quantity.quantity_id for quantity in problem.quantities)
         if problem.target is not None:
-            allowed_refs.add(problem.target.target_variable)
+            allowed_problem_refs.add(problem.target.target_variable)
 
-    if student_state.selected_target_ref is not None and student_state.selected_target_ref not in allowed_refs:
+    allowed_step_refs = set(allowed_problem_refs)
+    allowed_step_refs.update(fact.fact_id for fact in student_state.semantic_facts)
+
+    if student_state.selected_target_ref is not None and student_state.selected_target_ref not in allowed_problem_refs:
         issues.append(
             GraphValidationIssue(
                 code="student_invalid_selected_target_ref",
-                message="selected_target_ref must come from the known problem/reference refs",
+                message="selected_target_ref must come from the known problem refs",
                 details={"selected_target_ref": student_state.selected_target_ref},
             )
         )
 
     for step in student_state.steps:
-        unknown_refs = [ref_id for ref_id in step.referenced_ids if ref_id not in allowed_refs]
+        unknown_refs = [ref_id for ref_id in step.referenced_ids if ref_id not in allowed_step_refs]
         if unknown_refs:
             issues.append(
                 GraphValidationIssue(
                     code="student_unknown_referenced_ids",
-                    message="Student step referenced_ids must use only known problem/reference refs",
+                    message="Student step referenced_ids must use only known problem refs or semantic fact ids",
                     step_id=step.step_id,
                     details={"unknown_refs": unknown_refs},
                 )
@@ -74,6 +77,22 @@ def _student_sanity_validation_result(
             GraphValidationIssue(
                 code="student_missing_final_answer",
                 message="final_answer_only mode requires normalized_final_answer",
+            )
+        )
+    if student_state.mode == StudentWorkMode.FINAL_ANSWER_ONLY and student_state.steps:
+        issues.append(
+            GraphValidationIssue(
+                code="student_final_answer_only_with_steps",
+                message="final_answer_only mode must not include structured steps",
+            )
+        )
+    if student_state.mode == StudentWorkMode.UNPARSEABLE and (
+        student_state.steps or student_state.normalized_final_answer is not None
+    ):
+        issues.append(
+            GraphValidationIssue(
+                code="student_unparseable_with_structure",
+                message="unparseable mode must not include parseable final answer or structured steps",
             )
         )
 

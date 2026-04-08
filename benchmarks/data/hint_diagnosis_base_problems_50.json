@@ -1,0 +1,669 @@
+[
+  {
+    "problem_id": "alg_consecutive_1",
+    "category": "algebra_variable",
+    "difficulty": "medium",
+    "problem_text": "Three consecutive integers add up to 39. What is the smallest integer?",
+    "gold_final_answer": 12.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "alg_consecutive_2",
+    "category": "algebra_variable",
+    "difficulty": "medium",
+    "problem_text": "Three consecutive integers add up to 54. What is the smallest integer?",
+    "gold_final_answer": 17.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "alg_consecutive_3",
+    "category": "algebra_variable",
+    "difficulty": "medium",
+    "problem_text": "Three consecutive integers add up to 66. What is the smallest integer?",
+    "gold_final_answer": 21.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "alg_consecutive_4",
+    "category": "algebra_variable",
+    "difficulty": "medium",
+    "problem_text": "Three consecutive integers add up to 87. What is the smallest integer?",
+    "gold_final_answer": 28.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "alg_age_1",
+    "category": "algebra_variable",
+    "difficulty": "medium",
+    "problem_text": "Lan is 6 years older than Minh. Together they are 30 years old. How old is Minh?",
+    "gold_final_answer": 12.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "alg_age_2",
+    "category": "algebra_variable",
+    "difficulty": "medium",
+    "problem_text": "Lan is 5 years older than Minh. Together they are 43 years old. How old is Minh?",
+    "gold_final_answer": 19.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "alg_age_3",
+    "category": "algebra_variable",
+    "difficulty": "medium",
+    "problem_text": "Lan is 8 years older than Minh. Together they are 56 years old. How old is Minh?",
+    "gold_final_answer": 24.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "alg_rectangle_1",
+    "category": "algebra_variable",
+    "difficulty": "hard",
+    "problem_text": "A rectangle has length 5 cm more than its width. Its perimeter is 38 cm. What is the width?",
+    "gold_final_answer": 7.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "alg_rectangle_2",
+    "category": "algebra_variable",
+    "difficulty": "hard",
+    "problem_text": "A rectangle has length 4 cm more than its width. Its perimeter is 44 cm. What is the width?",
+    "gold_final_answer": 9.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "alg_rectangle_3",
+    "category": "algebra_variable",
+    "difficulty": "hard",
+    "problem_text": "A rectangle has length 8 cm more than its width. Its perimeter is 64 cm. What is the width?",
+    "gold_final_answer": 12.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "rate_fee_1",
+    "category": "unit_rate",
+    "difficulty": "medium",
+    "problem_text": "A shop charges $6 for each notebook and a flat delivery fee of $8. What is the total cost for 14 notebooks?",
+    "gold_final_answer": 92.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "rate_fee_2",
+    "category": "unit_rate",
+    "difficulty": "medium",
+    "problem_text": "A shop charges $9 for each notebook and a flat delivery fee of $5. What is the total cost for 11 notebooks?",
+    "gold_final_answer": 104.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "rate_fee_3",
+    "category": "unit_rate",
+    "difficulty": "medium",
+    "problem_text": "A shop charges $12 for each notebook and a flat delivery fee of $6. What is the total cost for 9 notebooks?",
+    "gold_final_answer": 114.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "rate_fee_4",
+    "category": "unit_rate",
+    "difficulty": "medium",
+    "problem_text": "A shop charges $7 for each notebook and a flat delivery fee of $12. What is the total cost for 18 notebooks?",
+    "gold_final_answer": 138.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "rate_distance_1",
+    "category": "unit_rate",
+    "difficulty": "hard",
+    "problem_text": "A train travels at 65 km per hour for 3 hours, then continues 14 km farther to the station. How far did it travel in all?",
+    "gold_final_answer": 209.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "rate_distance_2",
+    "category": "unit_rate",
+    "difficulty": "hard",
+    "problem_text": "A train travels at 72 km per hour for 4 hours, then continues 18 km farther to the station. How far did it travel in all?",
+    "gold_final_answer": 306.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "rate_distance_3",
+    "category": "unit_rate",
+    "difficulty": "hard",
+    "problem_text": "A train travels at 58 km per hour for 5 hours, then continues 12 km farther to the station. How far did it travel in all?",
+    "gold_final_answer": 302.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "rate_distance_4",
+    "category": "unit_rate",
+    "difficulty": "hard",
+    "problem_text": "A train travels at 84 km per hour for 2 hours, then continues 25 km farther to the station. How far did it travel in all?",
+    "gold_final_answer": 193.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "percent_discount_1",
+    "category": "percent",
+    "difficulty": "medium",
+    "problem_text": "A jacket costs $80. It is on sale for 25% off. What is the sale price?",
+    "gold_final_answer": 60.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "percent_discount_2",
+    "category": "percent",
+    "difficulty": "medium",
+    "problem_text": "A jacket costs $96. It is on sale for 15% off. What is the sale price?",
+    "gold_final_answer": 81.6,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "percent_discount_3",
+    "category": "percent",
+    "difficulty": "medium",
+    "problem_text": "A jacket costs $120. It is on sale for 20% off. What is the sale price?",
+    "gold_final_answer": 96.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "percent_discount_4",
+    "category": "percent",
+    "difficulty": "medium",
+    "problem_text": "A jacket costs $150. It is on sale for 30% off. What is the sale price?",
+    "gold_final_answer": 105.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "percent_tax_1",
+    "category": "percent",
+    "difficulty": "hard",
+    "problem_text": "A tablet costs $200. A store gives a 10% discount, and then charges 8% tax on the discounted price. What is the final price?",
+    "gold_final_answer": 194.4,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "percent_tax_2",
+    "category": "percent",
+    "difficulty": "hard",
+    "problem_text": "A tablet costs $180. A store gives a 20% discount, and then charges 5% tax on the discounted price. What is the final price?",
+    "gold_final_answer": 151.2,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "percent_tax_3",
+    "category": "percent",
+    "difficulty": "hard",
+    "problem_text": "A tablet costs $240. A store gives a 15% discount, and then charges 10% tax on the discounted price. What is the final price?",
+    "gold_final_answer": 224.4,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "percent_tax_4",
+    "category": "percent",
+    "difficulty": "hard",
+    "problem_text": "A tablet costs $320. A store gives a 25% discount, and then charges 8% tax on the discounted price. What is the final price?",
+    "gold_final_answer": 259.2,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "compare_1",
+    "category": "compare_sum_difference",
+    "difficulty": "medium",
+    "problem_text": "The sum of two numbers is 38, and the larger number is 8 more than the smaller number. What is the smaller number?",
+    "gold_final_answer": 15.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "compare_2",
+    "category": "compare_sum_difference",
+    "difficulty": "medium",
+    "problem_text": "The sum of two numbers is 58, and the larger number is 12 more than the smaller number. What is the smaller number?",
+    "gold_final_answer": 23.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "compare_3",
+    "category": "compare_sum_difference",
+    "difficulty": "medium",
+    "problem_text": "The sum of two numbers is 72, and the larger number is 10 more than the smaller number. What is the smaller number?",
+    "gold_final_answer": 31.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "compare_4",
+    "category": "compare_sum_difference",
+    "difficulty": "medium",
+    "problem_text": "The sum of two numbers is 50, and the larger number is 14 more than the smaller number. What is the smaller number?",
+    "gold_final_answer": 18.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "compare_5",
+    "category": "compare_sum_difference",
+    "difficulty": "medium",
+    "problem_text": "The sum of two numbers is 63, and the larger number is 9 more than the smaller number. What is the smaller number?",
+    "gold_final_answer": 27.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "compare_6",
+    "category": "compare_sum_difference",
+    "difficulty": "medium",
+    "problem_text": "The sum of two numbers is 84, and the larger number is 16 more than the smaller number. What is the smaller number?",
+    "gold_final_answer": 34.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "compare_7",
+    "category": "compare_sum_difference",
+    "difficulty": "medium",
+    "problem_text": "The sum of two numbers is 102, and the larger number is 18 more than the smaller number. What is the smaller number?",
+    "gold_final_answer": 42.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "reordered_correct"
+    ]
+  },
+  {
+    "problem_id": "intermediate_1",
+    "category": "intermediate_target",
+    "difficulty": "medium",
+    "problem_text": "Mia had $75. She spent $23 on groceries and then earned $18 by tutoring. How much money does she have now?",
+    "gold_final_answer": 70.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "intermediate_2",
+    "category": "intermediate_target",
+    "difficulty": "medium",
+    "problem_text": "Mia had $64. She spent $17 on groceries and then earned $12 by tutoring. How much money does she have now?",
+    "gold_final_answer": 59.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "intermediate_3",
+    "category": "intermediate_target",
+    "difficulty": "medium",
+    "problem_text": "Mia had $93. She spent $28 on groceries and then earned $15 by tutoring. How much money does she have now?",
+    "gold_final_answer": 80.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "intermediate_4",
+    "category": "intermediate_target",
+    "difficulty": "medium",
+    "problem_text": "Mia had $120. She spent $35 on groceries and then earned $22 by tutoring. How much money does she have now?",
+    "gold_final_answer": 107.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "intermediate_5",
+    "category": "intermediate_target",
+    "difficulty": "medium",
+    "problem_text": "Mia had $88. She spent $19 on groceries and then earned $27 by tutoring. How much money does she have now?",
+    "gold_final_answer": 96.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "growth_1",
+    "category": "growth_pattern",
+    "difficulty": "hard",
+    "problem_text": "A quantity doubles from one stage to the next. Over three stages, the total is 119. What was the amount in the first stage?",
+    "gold_final_answer": 17.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "growth_2",
+    "category": "growth_pattern",
+    "difficulty": "hard",
+    "problem_text": "A quantity doubles from one stage to the next. Over three stages, the total is 161. What was the amount in the first stage?",
+    "gold_final_answer": 23.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "growth_3",
+    "category": "growth_pattern",
+    "difficulty": "hard",
+    "problem_text": "A quantity doubles from one stage to the next. Over three stages, the total is 203. What was the amount in the first stage?",
+    "gold_final_answer": 29.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "growth_4",
+    "category": "growth_pattern",
+    "difficulty": "hard",
+    "problem_text": "A quantity doubles from one stage to the next. Over three stages, the total is 287. What was the amount in the first stage?",
+    "gold_final_answer": 41.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "growth_5",
+    "category": "growth_pattern",
+    "difficulty": "hard",
+    "problem_text": "A quantity doubles from one stage to the next. Over three stages, the total is 371. What was the amount in the first stage?",
+    "gold_final_answer": 53.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "geometry_1",
+    "category": "geometry",
+    "difficulty": "medium",
+    "problem_text": "A rectangle has width 7 cm and length 5 cm more than the width. What is its area?",
+    "gold_final_answer": 84.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "geometry_2",
+    "category": "geometry",
+    "difficulty": "medium",
+    "problem_text": "A rectangle has width 9 cm and length 6 cm more than the width. What is its area?",
+    "gold_final_answer": 135.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "geometry_3",
+    "category": "geometry",
+    "difficulty": "medium",
+    "problem_text": "A rectangle has width 11 cm and length 4 cm more than the width. What is its area?",
+    "gold_final_answer": 165.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "geometry_4",
+    "category": "geometry",
+    "difficulty": "medium",
+    "problem_text": "A rectangle has width 13 cm and length 7 cm more than the width. What is its area?",
+    "gold_final_answer": 260.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "geometry_5",
+    "category": "geometry",
+    "difficulty": "medium",
+    "problem_text": "A rectangle has width 15 cm and length 8 cm more than the width. What is its area?",
+    "gold_final_answer": 345.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion"
+    ]
+  },
+  {
+    "problem_id": "hard_parse_1",
+    "category": "hard_parse",
+    "difficulty": "hard",
+    "problem_text": "A deep-sea monster rises from the waters once every hundred years to feast on a ship and sate its hunger. Over three hundred years, it has consumed 847 people. Ships have been built larger over time, so each new ship has twice as many people as the last ship. How many people were on the ship the monster ate in the first hundred years?",
+    "gold_final_answer": 121.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "final_answer_only"
+    ]
+  },
+  {
+    "problem_id": "hard_parse_2",
+    "category": "hard_parse",
+    "difficulty": "hard",
+    "problem_text": "A deep-sea monster rises from the waters once every hundred years to feast on a ship and sate its hunger. Over three hundred years, it has consumed 539 people. Ships have been built larger over time, so each new ship has twice as many people as the last ship. How many people were on the ship the monster ate in the first hundred years?",
+    "gold_final_answer": 77.0,
+    "available_variant_types": [
+      "correct_trace",
+      "arithmetic_error",
+      "relation_error",
+      "target_confusion",
+      "final_answer_only"
+    ]
+  }
+]

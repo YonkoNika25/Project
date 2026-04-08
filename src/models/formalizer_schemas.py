@@ -432,10 +432,30 @@ class StudentStepAttempt(BaseModel):
         return self
 
 
+class StudentSemanticFact(BaseModel):
+    fact_id: str
+    label: str
+    value: Optional[float] = Field(default=None)
+    grounding: Optional[str] = Field(default=None)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    notes: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_fact_id(self):
+        if not self.fact_id.strip():
+            raise ValueError("fact_id must not be empty")
+        if not self.label.strip():
+            raise ValueError("label must not be empty")
+        return self
+
+
 class StudentWorkState(BaseModel):
     raw_answer: str
     normalized_final_answer: Optional[float] = Field(default=None)
     mode: StudentWorkMode = Field(default=StudentWorkMode.FINAL_ANSWER_ONLY)
+    semantic_facts: List[StudentSemanticFact] = Field(default_factory=list)
     steps: List[StudentStepAttempt] = Field(default_factory=list)
     student_graph: Optional[ProblemGraph] = Field(default=None)
     selected_target_ref: Optional[str] = Field(default=None)
@@ -450,6 +470,9 @@ class StudentWorkState(BaseModel):
         step_ids = [step.step_id for step in self.steps]
         if len(step_ids) != len(set(step_ids)):
             raise ValueError("StudentWorkState contains duplicate step_id values")
+        fact_ids = [fact.fact_id for fact in self.semantic_facts]
+        if len(fact_ids) != len(set(fact_ids)):
+            raise ValueError("StudentWorkState contains duplicate semantic fact ids")
         if self.student_graph is not None and self.student_graph.target_node_id is None and (
             self.normalized_final_answer is not None or self.steps
         ):

@@ -51,7 +51,7 @@ def _score_correct_answer(evidence: DiagnosisEvidence) -> DiagnosisHypothesis:
     edit_cost = _graph_edit_cost(evidence)
 
     if "correct_final_answer" in evidence_types:
-        score += 9.0
+        score += 6.5
         rationale.append("correct_final_answer")
     if "target_ref_match" in evidence_types:
         score += 1.5
@@ -66,17 +66,23 @@ def _score_correct_answer(evidence: DiagnosisEvidence) -> DiagnosisHypothesis:
         score += 0.4
         rationale.append("restated_final_answer")
     if edit_cost > 0 and "correct_final_answer" in evidence_types:
-        score += max(0.0, 1.0 - min(edit_cost / 8.0, 1.0))
+        score += max(0.0, 1.0 - min(edit_cost / 10.0, 1.0))
         rationale.append(f"graph_edit_cost={edit_cost}")
 
     if "final_answer_mismatch" in evidence_types:
         score -= 6.0
     if "selected_intermediate_reference" in evidence_types or "selected_visible_problem_quantity" in evidence_types:
         score -= 8.0
-    if "operation_mismatch" in evidence_types and "correct_final_answer" not in evidence_types:
-        score -= 3.0
-    if "dependency_mismatch" in evidence_types and "correct_final_answer" not in evidence_types:
-        score -= 2.5
+    if "operation_mismatch" in evidence_types:
+        score -= 5.0 if "correct_final_answer" in evidence_types else 3.0
+    if "dependency_mismatch" in evidence_types:
+        score -= 4.0 if "correct_final_answer" in evidence_types else 2.5
+    if "unsupported_student_step" in evidence_types:
+        score -= 2.5 if "correct_final_answer" in evidence_types else 1.5
+    if "step_value_mismatch" in evidence_types:
+        score -= 3.5 if "correct_final_answer" in evidence_types else 2.0
+    if edit_cost > 2:
+        score -= min(edit_cost / 3.0, 3.0)
 
     subtype = "equivalent_reordered_process" if "reordered_but_consistent_steps" in evidence_types else "matches_canonical_reference"
     summary = (
@@ -219,8 +225,8 @@ def _score_quantity_relation_error(evidence: DiagnosisEvidence) -> DiagnosisHypo
         score += 2.0
         rationale.append("edge_level_divergence")
 
-    if "unsupported_student_step" in evidence_types and "correct_final_answer" not in evidence_types:
-        score += 1.5
+    if "unsupported_student_step" in evidence_types:
+        score += 2.0 if "correct_final_answer" in evidence_types else 1.5
         rationale.append("unsupported_student_step")
 
     if align_counts.get("dependency_mismatch", 0) > 0:
@@ -229,8 +235,16 @@ def _score_quantity_relation_error(evidence: DiagnosisEvidence) -> DiagnosisHypo
 
     if "selected_intermediate_reference" in evidence_types or "selected_visible_problem_quantity" in evidence_types:
         score -= 3.0
-    if "correct_final_answer" in evidence_types and "reordered_but_consistent_steps" in evidence_types:
-        score -= 5.0
+    if "correct_final_answer" in evidence_types:
+        if "reordered_but_consistent_steps" in evidence_types:
+            score -= 5.0
+        elif any(
+            evidence_type in evidence_types
+            for evidence_type in {"operation_mismatch", "dependency_mismatch", "unsupported_student_step"}
+        ):
+            score += 3.0
+            subtype = "process_inconsistent_but_final_correct"
+            summary = "The student's final answer is correct, but the recorded process is inconsistent with the canonical quantity relationships."
 
     return DiagnosisHypothesis(
         label=DiagnosisLabel.QUANTITY_RELATION_ERROR,

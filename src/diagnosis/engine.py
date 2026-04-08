@@ -101,17 +101,12 @@ def _llm_diagnose(
     llm_result = DiagnosisResult.model_validate(payload)
 
     evidence_types = set(_evidence_types(evidence))
-    if "correct_final_answer" in evidence_types and llm_result.diagnosis_label != DiagnosisLabel.CORRECT_ANSWER:
-        raise ValueError("LLM diagnosis conflicts with correct_final_answer evidence")
     if "unparseable_answer" in evidence_types and llm_result.diagnosis_label != DiagnosisLabel.UNPARSEABLE_ANSWER:
         raise ValueError("LLM diagnosis conflicts with unparseable_answer evidence")
     if (
         "selected_intermediate_reference" in evidence_types or "selected_visible_problem_quantity" in evidence_types
     ) and llm_result.diagnosis_label != DiagnosisLabel.TARGET_MISUNDERSTANDING:
         raise ValueError("LLM diagnosis conflicts with target-selection evidence")
-    if "reordered_but_consistent_steps" in evidence_types and "correct_final_answer" in evidence_types:
-        if llm_result.diagnosis_label != DiagnosisLabel.CORRECT_ANSWER:
-            raise ValueError("LLM diagnosis conflicts with reordered but correct evidence")
 
     return llm_result
 

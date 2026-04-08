@@ -81,6 +81,25 @@ def student_steps(student: StudentWorkState) -> list[StepGraphPayload]:
     output_node_to_step_id: dict[str, str] = {}
     step_to_output_node: dict[str, str] = {}
     dependency_edges_to_step: dict[str, list[str]] = {}
+    step_order = {step.step_id: index for index, step in enumerate(student.steps)}
+    semantic_fact_by_id = {fact.fact_id: fact for fact in student.semantic_facts}
+
+    def _semantic_fact_supporting_steps(fact_id: str, target_step_id: str) -> list[str]:
+        fact = semantic_fact_by_id.get(fact_id)
+        if fact is None:
+            return []
+        target_index = step_order.get(target_step_id, len(student.steps))
+        supporting: list[str] = []
+        for candidate in student.steps:
+            candidate_index = step_order.get(candidate.step_id, len(student.steps))
+            if candidate_index >= target_index:
+                continue
+            if fact.grounding and fact.grounding.strip() and fact.grounding.strip() in candidate.raw_text:
+                supporting.append(candidate.step_id)
+                continue
+            if fact.value is not None and values_match(candidate.extracted_value, fact.value):
+                supporting.append(candidate.step_id)
+        return supporting
 
     graph = student.student_graph
     if graph is not None:
@@ -99,19 +118,31 @@ def student_steps(student: StudentWorkState) -> list[StepGraphPayload]:
             if target_node is None or target_node.node_type != ProblemGraphNodeType.OPERATION or target_node.step_id is None:
                 continue
             source_step_id = output_node_to_step_id.get(edge.source_node_id)
-            if source_step_id is None:
+            if source_step_id is not None:
+                dependency_edges_to_step.setdefault(target_node.step_id, []).append(source_step_id)
                 continue
-            dependency_edges_to_step.setdefault(target_node.step_id, []).append(source_step_id)
+            if edge.source_node_id in semantic_fact_by_id:
+                dependency_edges_to_step.setdefault(target_node.step_id, []).extend(
+                    _semantic_fact_supporting_steps(edge.source_node_id, target_node.step_id)
+                )
 
     payload: list[StepGraphPayload] = []
     for step in student.steps:
+        dependency_step_ids = dependency_edges_to_step.get(step.step_id, [])
+        deduped_dependencies: list[str] = []
+        seen_dependencies: set[str] = set()
+        for dependency_step_id in dependency_step_ids:
+            if dependency_step_id in seen_dependencies:
+                continue
+            seen_dependencies.add(dependency_step_id)
+            deduped_dependencies.append(dependency_step_id)
         payload.append(
             StepGraphPayload(
                 step_id=step.step_id,
                 output_ref=step_to_output_node.get(step.step_id),
                 operation=step.operation or TraceOperation.UNKNOWN,
                 input_refs=list(step.referenced_ids),
-                dependency_step_ids=dependency_edges_to_step.get(step.step_id, []),
+                dependency_step_ids=deduped_dependencies,
                 output_value=step.extracted_value,
             )
         )
@@ -126,17 +157,23 @@ def infer_student_target_ref(
     if student.selected_target_ref is not None:
         return student.selected_target_ref
 
-    final_answer = student.normalized_final_answer
-    if values_match(final_answer, reference.final_answer):
-        return reference.chosen_plan.target_ref
-
-    for ref_step in reference_steps(reference):
-        if values_match(final_answer, ref_step.output_value):
-            return ref_step.output_ref
-
-    for quantity in problem.quantities:
-        if values_match(quantity.value, final_answer):
-            return quantity.quantity_id
+    graph = student.student_graph
+    if graph is not None and graph.target_node_id is not None:
+        incoming_target_edges = [
+            edge
+            for edge in graph.edges
+            if edge.edge_type == ProblemGraphEdgeType.TARGETS_VALUE and edge.target_node_id == graph.target_node_id
+        ]
+        visible_problem_refs = {quantity.quantity_id for quantity in problem.quantities}
+        reference_output_refs = {step.output_ref for step in reference.chosen_plan.steps}
+        for edge in incoming_target_edges:
+            source_ref = edge.source_node_id
+            if source_ref == reference.chosen_plan.target_ref:
+                return source_ref
+            if source_ref in reference_output_refs:
+                return source_ref
+            if source_ref in visible_problem_refs:
+                return source_ref
 
     return None
 

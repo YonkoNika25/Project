@@ -32,31 +32,31 @@ from src.runtime.graph_validator import validate_problem_graph
 def _build_llm_graph_prompt(
     problem_text: str,
     heuristic_problem: FormalizedProblem,
+    heuristic_evidence: dict,
     feedback_issues: list[dict],
     attempt_index: int,
 ) -> tuple[str, str]:
-    compact_draft = _build_compact_draft(heuristic_problem)
+    compact_draft = _build_compact_draft(heuristic_problem, heuristic_evidence)
     system_prompt = (
-        "You are a math problem formalizer. Return only a compact typed skeleton JSON object. "
-        "Do not return the full FormalizedProblem. Use only the provided ids and allowed enum values. "
-        "Your job is to correct semantics and propose an executable operation chain; local code will build the final object."
+        "You are a math problem formalizer. Return only a compact semantic sketch JSON object, not the final "
+        "FormalizedProblem. Use the heuristic draft only as lightweight anchors. Your job is to infer the hidden "
+        "mathematical structure and propose a clean executable plan sketch. Local code will compile your sketch "
+        "into the final typed graph."
     )
     user_prompt = (
         f"Problem text:\n{problem_text}\n\n"
         "Return one JSON object with exactly these top-level fields:\n"
         "{\n"
-        '  "quantity_updates": [\n'
+        '  "quantity_annotations": [\n'
         '    {"quantity_id": "...", "semantic_role": "...", "unit": "...", "entity_id": "...", "is_target_candidate": true}\n'
         "  ],\n"
-        '  "target_update": {"surface_text": "...", "normalized_question": "...", "target_variable": "...", '
-        '"target_quantity_id": "...", "entity_id": "...", "unit": "...", "description": "...", "confidence": 0.0},\n'
-        '  "relation_updates": [\n'
-        '    {"relation_id": "...", "relation_type": "...", "operation_hint": "...", '
-        '"source_quantity_ids": ["..."], "target_variable": "...", "expression": "...", "rationale": "...", "confidence": 0.0}\n'
+        '  "semantic_facts": [\n'
+        '    {"fact_id": "total_multiplier", "label": "...", "value": 0.0, "unit": "...", "semantic_role": "...", "grounding": "...", "notes": ["..."]}\n'
         "  ],\n"
-        '  "graph_steps": [\n'
-        '    {"step_id": "...", "step_index": 1, "operation": "...", "input_refs": ["..."], "output_ref": "...", '
-        '"expression": "...", "label": "...", "output_unit": "...", "confidence": 0.0}\n'
+        '  "target": {"surface_text": "...", "normalized_question": "...", "target_variable": "...", "target_quantity_id": "...", "entity_id": "...", "unit": "...", "description": "...", "confidence": 0.0},\n'
+        '  "relation": {"relation_type": "...", "operation_hint": "...", "source_quantity_ids": ["..."], "target_variable": "...", "expression": "...", "rationale": "...", "confidence": 0.0},\n'
+        '  "plan_steps": [\n'
+        '    {"step_id": "...", "step_index": 1, "operation": "...", "input_refs": ["..."], "output_ref": "...", "expression": "...", "label": "...", "output_unit": "...", "confidence": 0.0}\n'
         "  ],\n"
         '  "graph_target_node_id": "...",\n'
         '  "graph_confidence": 0.0,\n'
@@ -68,18 +68,19 @@ def _build_llm_graph_prompt(
         f"Allowed quantity semantic_role values: {[role.value for role in QuantitySemanticRole]}\n"
         f"Allowed relation_type values: {[relation.value for relation in RelationType]}\n"
         f"Allowed operation_hint values: {[operation.value for operation in OperationType]}\n"
-        f"Allowed graph_steps operation values: {[operation.value for operation in TraceOperation]}\n\n"
+        f"Allowed plan_steps operation values: {[operation.value for operation in TraceOperation]}\n\n"
         "Hard constraints:\n"
-        "1. Reuse existing quantity_id and entity_id values from the draft. Do not invent new quantity ids.\n"
-        "2. graph_target_node_id must match target_update.target_variable or the heuristic target variable.\n"
-        "3. Each graph step must include step_id, step_index, operation, input_refs, output_ref, and expression.\n"
-        "4. input_refs may reference only known quantity ids or outputs created by earlier steps.\n"
-        "5. The final target must be reachable from the graph_steps sequence.\n"
-        "6. Use only enum values exactly as listed above.\n"
-        "7. Keep notes concise.\n\n"
+        "1. Treat the draft as anchors, not as the full structure of the solution.\n"
+        "2. If the problem needs hidden numeric facts, place them in semantic_facts.\n"
+        "3. Do not invent new quantity ids like quantity_2 or quantity_3 unless they already exist in the draft.\n"
+        "4. plan_steps.expression must be executable RHS only; never include assignments like a = b.\n"
+        "5. graph_target_node_id must match target.target_variable or the heuristic target variable.\n"
+        "6. The final target must be reachable from the plan_steps sequence.\n"
+        "7. Prefer a faithful intermediate structure over jumping straight to the final answer.\n"
+        "8. Use only enum values exactly as listed above.\n\n"
         f"Attempt index: {attempt_index}\n\n"
         f"Structured feedback from the previous failed attempt:\n{json.dumps(feedback_issues, ensure_ascii=True)}\n\n"
-        "Compact heuristic draft for reference only:\n"
+        "Anchor evidence pack and heuristic projection for reference only:\n"
         f"{json.dumps(compact_draft, ensure_ascii=True)}"
     )
     return system_prompt, user_prompt
@@ -88,6 +89,7 @@ def _build_llm_graph_prompt(
 def _llm_formalize_problem(
     problem_text: str,
     heuristic_problem: FormalizedProblem,
+    heuristic_evidence: dict,
     llm_client: LLMClient,
 ) -> FormalizedProblem:
     feedback_issues: list[dict] = []
@@ -97,6 +99,7 @@ def _llm_formalize_problem(
         system_prompt, user_prompt = _build_llm_graph_prompt(
             problem_text,
             heuristic_problem,
+            heuristic_evidence,
             feedback_issues,
             attempt_index,
         )
@@ -105,7 +108,7 @@ def _llm_formalize_problem(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.1,
-            max_tokens=50000,
+            max_tokens=10000,
         )
         payload["problem_text"] = problem_text.strip()
         notes = list(payload.get("notes", []))
@@ -148,7 +151,7 @@ def _llm_formalize_problem(
                 continue
             success_notes = list(refined.notes)
             success_notes.append("llm_formalization_used")
-            success_notes.append("llm_compact_skeleton_used")
+            success_notes.append("llm_semantic_sketch_used")
             if attempt_index > 1:
                 success_notes.append(f"llm_formalization_repaired_after:{attempt_index}")
             return refined.model_copy(update={"notes": success_notes})

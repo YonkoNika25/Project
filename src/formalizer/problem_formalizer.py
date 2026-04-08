@@ -13,12 +13,12 @@ def formalize_problem(
     llm_client: LLMClient | None = None,
 ) -> FormalizedProblem:
     """Build a structured problem representation from raw text."""
-    heuristic_problem = _heuristic_formalize_problem(problem_text)
+    heuristic_problem, heuristic_evidence = _heuristic_formalize_problem(problem_text)
     if llm_client is None:
         return heuristic_problem
 
     try:
-        return _llm_formalize_problem(problem_text, heuristic_problem, llm_client)
+        return _llm_formalize_problem(problem_text, heuristic_problem, heuristic_evidence, llm_client)
     except (LLMGenerationError, ValueError, TypeError):
         notes = list(heuristic_problem.notes)
         notes.append("llm_formalization_failed_fallback")

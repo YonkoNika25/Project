@@ -24,6 +24,44 @@ def _reference_output_to_step_id(reference: CanonicalReference) -> dict[str, str
     return {step.output_ref: step.step_id for step in reference.chosen_plan.steps}
 
 
+def _student_target_linked_output_step_id(student: StudentWorkState) -> str | None:
+    graph = student.student_graph
+    if graph is None or graph.target_node_id is None:
+        return None
+    linked_output_node_id = next(
+        (
+            edge.source_node_id
+            for edge in graph.edges
+            if edge.edge_type.value == "targets_value"
+            and edge.target_node_id == graph.target_node_id
+            and edge.source_node_id.startswith("student_output_")
+        ),
+        None,
+    )
+    if linked_output_node_id is None:
+        return None
+    output_edge = next(
+        (
+            edge
+            for edge in graph.edges
+            if edge.edge_type.value == "output_from_operation"
+            and edge.target_node_id == linked_output_node_id
+        ),
+        None,
+    )
+    if output_edge is None:
+        return None
+    operation_node = next((node for node in graph.nodes if node.node_id == output_edge.source_node_id), None)
+    return operation_node.step_id if operation_node is not None else None
+
+
+def _unique_visible_problem_quantity(problem: FormalizedProblem, value: float | None):
+    if value is None:
+        return None
+    matches = [quantity for quantity in problem.quantities if values_match(quantity.value, value)]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _build_unparseable_evidence() -> DiagnosisEvidence:
     return DiagnosisEvidence(
         evidence_items=[
@@ -76,6 +114,7 @@ def build_diagnosis_evidence(
     inferred_target_ref = infer_student_target_ref(problem, reference, student)
     alignments = global_align_student_steps(student, reference)
     alignment_map = _alignment_payload(alignments)
+    alignment_by_student_step_id = {item.student_step_id: item for item in alignments}
     reordered_consistent = detect_reordered_but_consistent(student, reference, alignments)
     student_steps_by_id = {step.step_id: step for step in student.steps}
     edit_summary = graph_edit_summary(reference, alignments)
@@ -160,6 +199,46 @@ def build_diagnosis_evidence(
                         metadata={
                             "selected_target_ref": inferred_target_ref,
                             "quantity_value": quantity.value,
+                        },
+                    )
+                )
+                if "selected_visible_quantity_as_answer" not in mechanisms:
+                    mechanisms.append("selected_visible_quantity_as_answer")
+    else:
+        linked_output_step_id = _student_target_linked_output_step_id(student)
+        if linked_output_step_id is not None:
+            linked_alignment = alignment_by_student_step_id.get(linked_output_step_id)
+            if linked_alignment is not None and linked_alignment.reference_step_id is not None:
+                matched_reference_output = linked_alignment.matched_output_ref
+                if matched_reference_output is not None and matched_reference_output != target_ref:
+                    matched_step_id = linked_alignment.reference_step_id
+                    evidence_items.append(
+                        EvidenceItem(
+                            evidence_type="selected_intermediate_reference",
+                            description="The student graph targets a student-produced value aligned to an intermediate canonical reference output.",
+                            confidence=0.92,
+                            reference_step_id=matched_step_id,
+                            student_step_id=linked_output_step_id,
+                            metadata={"matched_output_ref": matched_reference_output},
+                        )
+                    )
+                    if "selected_intermediate_target" not in mechanisms:
+                        mechanisms.append("selected_intermediate_target")
+                    if first_divergence_step_id is None:
+                        first_divergence_step_id = matched_step_id
+
+        if linked_output_step_id is None:
+            matched_quantity = _unique_visible_problem_quantity(problem, student.normalized_final_answer)
+            if matched_quantity is not None:
+                evidence_items.append(
+                    EvidenceItem(
+                        evidence_type="selected_visible_problem_quantity",
+                        description="The student's final answer exactly matches one visible quantity from the problem text without evidence of solving for the requested target.",
+                        confidence=0.82,
+                        quantity_ids=[matched_quantity.quantity_id],
+                        metadata={
+                            "selected_target_ref": matched_quantity.quantity_id,
+                            "quantity_value": matched_quantity.value,
                         },
                     )
                 )

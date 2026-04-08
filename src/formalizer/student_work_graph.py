@@ -38,9 +38,28 @@ def _ensure_reference_node(
     ref_id: str,
     nodes: dict[str, ProblemGraphNode],
     problem: FormalizedProblem | None,
+    student_work: StudentWorkState,
     provenance: ProvenanceSource,
 ) -> None:
     if ref_id in nodes:
+        return
+
+    semantic_fact = next((item for item in student_work.semantic_facts if item.fact_id == ref_id), None)
+    if semantic_fact is not None:
+        _add_node_if_missing(
+            nodes,
+            ProblemGraphNode(
+                node_id=semantic_fact.fact_id,
+                node_type=ProblemGraphNodeType.INTERMEDIATE,
+                label=semantic_fact.label,
+                value=semantic_fact.value,
+                semantic_role=QuantitySemanticRole.INTERMEDIATE,
+                confidence=semantic_fact.confidence,
+                provenance=provenance,
+                notes=list(semantic_fact.notes)
+                + ([f"grounding={semantic_fact.grounding}"] if semantic_fact.grounding else []),
+            ),
+        )
         return
 
     if problem is not None:
@@ -95,6 +114,7 @@ def _append_edge(
 def build_student_work_graph(
     student_work: StudentWorkState,
     problem: FormalizedProblem | None = None,
+    provenance_override: ProvenanceSource | None = None,
 ) -> ProblemGraph | None:
     """Construct a comparable graph representation for student work."""
     has_structured_step = any(
@@ -104,16 +124,20 @@ def build_student_work_graph(
     if student_work.normalized_final_answer is None and not has_structured_step:
         return None
 
-    provenance = _graph_provenance(student_work)
+    provenance = provenance_override or _graph_provenance(student_work)
     nodes: dict[str, ProblemGraphNode] = {}
     edges: list[ProblemGraphEdge] = []
     edge_ids: set[str] = set()
     output_node_ids: list[str] = []
     value_sources: list[tuple[str, float]] = []
+    output_node_to_step: dict[str, str] = {}
+
+    for semantic_fact in student_work.semantic_facts:
+        _ensure_reference_node(semantic_fact.fact_id, nodes, problem, student_work, provenance)
 
     for step in student_work.steps:
         for ref_id in step.referenced_ids:
-            _ensure_reference_node(ref_id, nodes, problem, provenance)
+            _ensure_reference_node(ref_id, nodes, problem, student_work, provenance)
 
         operation = step.operation
         if operation is None:
@@ -184,6 +208,7 @@ def build_student_work_graph(
             ),
         )
         output_node_ids.append(output_node_id)
+        output_node_to_step[output_node_id] = step.step_id
         value_sources.append((output_node_id, step.extracted_value))
         _append_edge(
             edges,
@@ -205,7 +230,7 @@ def build_student_work_graph(
         target_notes = []
         if student_work.selected_target_ref is not None:
             target_notes.append(f"selected_target_ref={student_work.selected_target_ref}")
-            _ensure_reference_node(student_work.selected_target_ref, nodes, problem, provenance)
+            _ensure_reference_node(student_work.selected_target_ref, nodes, problem, student_work, provenance)
         _add_node_if_missing(
             nodes,
             ProblemGraphNode(
@@ -220,22 +245,23 @@ def build_student_work_graph(
             ),
         )
 
-        if output_node_ids:
-            last_output_id = output_node_ids[-1]
-            _append_edge(
-                edges,
-                edge_ids,
-                ProblemGraphEdge(
-                    edge_id=f"edge_{last_output_id}_to_{target_node_id}",
-                    source_node_id=last_output_id,
-                    target_node_id=target_node_id,
-                    edge_type=ProblemGraphEdgeType.TARGETS_VALUE,
-                    confidence=min(max(student_work.confidence, 0.4), 0.99),
-                    provenance=provenance,
-                    notes=["linked_from_last_student_step"],
-                ),
-            )
-        elif student_work.selected_target_ref is not None:
+        matching_output_candidates = [
+            output_node_id
+            for output_node_id, output_value in value_sources
+            if abs(output_value - student_work.normalized_final_answer) < 1e-9
+        ]
+        matching_output_id = None
+        for output_node_id in reversed(matching_output_candidates):
+            step_id = output_node_to_step.get(output_node_id)
+            step = next((candidate for candidate in student_work.steps if candidate.step_id == step_id), None)
+            if step is not None and "answer" in step.raw_text.lower() and step.operation in {TraceOperation.DERIVE, TraceOperation.UNKNOWN}:
+                continue
+            matching_output_id = output_node_id
+            break
+        if matching_output_id is None and matching_output_candidates:
+            matching_output_id = matching_output_candidates[-1]
+
+        if student_work.selected_target_ref is not None:
             _append_edge(
                 edges,
                 edge_ids,
@@ -249,10 +275,27 @@ def build_student_work_graph(
                     notes=["linked_from_selected_target_ref"],
                 ),
             )
+
+        if matching_output_id is not None:
+            _append_edge(
+                edges,
+                edge_ids,
+                ProblemGraphEdge(
+                    edge_id=f"edge_{matching_output_id}_to_{target_node_id}",
+                    source_node_id=matching_output_id,
+                    target_node_id=target_node_id,
+                    edge_type=ProblemGraphEdgeType.TARGETS_VALUE,
+                    confidence=min(max(student_work.confidence, 0.4), 0.99),
+                    provenance=provenance,
+                    notes=["linked_from_matching_final_value"],
+                ),
+            )
     elif output_node_ids:
         target_node_id = output_node_ids[-1]
 
     graph_notes = [f"student_steps={len(student_work.steps)}", "student_graph_built"]
+    if student_work.semantic_facts:
+        graph_notes.append(f"student_semantic_facts={len(student_work.semantic_facts)}")
     if student_work.selected_target_ref is not None:
         graph_notes.append(f"selected_target_ref={student_work.selected_target_ref}")
 

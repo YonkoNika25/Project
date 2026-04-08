@@ -1,0 +1,14 @@
+{
+  "base_problem_count": 50,
+  "sample_count": 200,
+  "category_counts": {
+    "algebra_variable": 40,
+    "unit_rate": 30,
+    "percent": 30,
+    "compare_sum_difference": 30,
+    "intermediate_target": 20,
+    "growth_pattern": 20,
+    "geometry": 20,
+    "hard_parse": 10
+  }
+}
