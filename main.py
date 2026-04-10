@@ -4,16 +4,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from src.input_loader import (
+    DEFAULT_PROBLEM_PATH,
+    DEFAULT_STUDENT_ANSWER_PATH,
+    load_problem_and_student_answer,
+)
 from src.llm import LLMClient, build_default_llm_client
 from src.models import HintMode
 from src.pipeline import run_tutoring_pipeline
 
-
-# Demo inputs. Edit these values and run `python main.py`.
-PROBLEM_TEXT = (
-    "A concert ticket costs $40. Mr. Benson bought 12 tickets and received a 5% discount for every ticket bought that exceeds 10. How much did Mr. Benson pay in all?"
-)
-STUDENT_ANSWER = "12 * 40 = 480\n12 - 10 = 2\n5% of 40 = 2\n2 * 2 = 4\n480 - 4 = 474\nAnswer is 474."
 
 # When True, the pipeline will try the configured OpenRouter model and fall back
 # safely to deterministic logic if an LLM step fails.
@@ -129,24 +128,27 @@ def _print_llm_responses(
 
 
 def main() -> None:
+    problem_text, student_answer = load_problem_and_student_answer()
     base_llm_client = build_default_llm_client() if USE_LLM else None
     recording_llm_client = RecordingLLMClient(base_llm_client) if base_llm_client is not None else None
     active_use_llm = USE_LLM and recording_llm_client is not None
 
     print("Tutoring Pipeline Demo")
+    print(f"PROBLEM_PATH = {DEFAULT_PROBLEM_PATH}")
+    print(f"STUDENT_ANSWER_PATH = {DEFAULT_STUDENT_ANSWER_PATH}")
     print(f"USE_LLM = {USE_LLM}")
     print(f"HINT_MODE = {HINT_MODE.value}")
     print(f"LLM client available = {base_llm_client is not None}")
 
     result = run_tutoring_pipeline(
-        problem_text=PROBLEM_TEXT,
-        student_answer=STUDENT_ANSWER,
+        problem_text=problem_text,
+        student_answer=student_answer,
         hint_mode=HINT_MODE,
         llm_client=recording_llm_client,
         use_llm=active_use_llm,
     )
 
-    _print_json("Input", {"problem_text": PROBLEM_TEXT, "student_answer": STUDENT_ANSWER})
+    _print_json("Input", {"problem_text": problem_text, "student_answer": student_answer})
     _print_json("Problem", result.problem.model_dump(mode="json"))
     _print_json("Reference", result.reference.model_dump(mode="json"))
     _print_json("Student Work", result.student_work.model_dump(mode="json"))

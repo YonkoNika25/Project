@@ -6,24 +6,13 @@ from typing import Any
 
 import requests
 
+from src.input_loader import (
+    DEFAULT_PROBLEM_PATH,
+    DEFAULT_STUDENT_ANSWER_PATH,
+    load_problem_and_student_answer,
+)
 from src.llm import LLMGenerationError, OpenRouterLLMClient, build_default_llm_client
 
-
-PROBLEM_TEXT = (
-    "A deep-sea monster rises from the waters once every hundred years to feast on a ship and sate its hunger. "
-    "Over three hundred years, it has consumed 847 people. Ships have been built larger over time, so each new "
-    "ship has twice as many people as the last ship. How many people were on the ship the monster ate in the "
-    "first hundred years?"
-)
-
-STUDENT_ANSWER = (
-    "Let the first ship have x people.\n"
-    "Then the next two ships had 3x and 4x people.\n"
-    "x + 3x + 4x = 847\n"
-    "8x = 847\n"
-    "x = 121\n"
-    "Answer is 121."
-)
 
 MAX_TOKENS = 10000
 
@@ -109,13 +98,17 @@ def generate_and_record_json(
 
 
 def main() -> None:
+    problem_text, student_answer = load_problem_and_student_answer()
     base_client = build_default_llm_client()
     if base_client is None:
         raise RuntimeError("No default LLM client available. Check your .env OpenRouter settings.")
     if not isinstance(base_client, OpenRouterLLMClient):
         raise RuntimeError("This smoke test expects an OpenRouterLLMClient.")
 
-    system_prompt, user_prompt = build_direct_hint_prompts(PROBLEM_TEXT, STUDENT_ANSWER)
+    print(f"PROBLEM_PATH = {DEFAULT_PROBLEM_PATH}")
+    print(f"STUDENT_ANSWER_PATH = {DEFAULT_STUDENT_ANSWER_PATH}")
+
+    system_prompt, user_prompt = build_direct_hint_prompts(problem_text, student_answer)
     result = generate_and_record_json(
         base_client,
         task_name="direct_hint_only",
@@ -128,8 +121,8 @@ def main() -> None:
     print("=== INPUT ===")
     print(json.dumps(
         {
-            "problem_text": PROBLEM_TEXT,
-            "student_answer": STUDENT_ANSWER,
+            "problem_text": problem_text,
+            "student_answer": student_answer,
         },
         indent=2,
         ensure_ascii=False,
