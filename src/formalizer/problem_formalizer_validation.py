@@ -123,6 +123,7 @@ def _graph_feedback_payload(validation_result: GraphValidationResult) -> list[di
 
 
 def validate_formalized_problem(problem: FormalizedProblem) -> FormalizedProblem:
+    # Defensive normalization so downstream graph/solver code sees consistent structure.
     notes = list(problem.notes)
 
     deduped_entities: list[ProblemEntity] = []
@@ -272,6 +273,7 @@ def _apply_local_semantic_repairs(problem: FormalizedProblem) -> FormalizedProbl
     if problem.target is None:
         return problem
 
+    # Local rule-based guards to remove semantically inconsistent target bindings.
     notes = list(problem.notes)
     graph_steps = _heuristic_graph_operation_steps(problem)
     target = problem.target
@@ -331,6 +333,7 @@ def _apply_local_semantic_repairs(problem: FormalizedProblem) -> FormalizedProbl
 
 
 def _semantic_sanity_validation_result(problem: FormalizedProblem) -> GraphValidationResult:
+    # Domain-shape checks beyond schema/runtime graph constraints.
     issues: list[GraphValidationIssue] = []
     graph_steps = _heuristic_graph_operation_steps(problem)
     quantities_by_role = {quantity.semantic_role for quantity in problem.quantities}

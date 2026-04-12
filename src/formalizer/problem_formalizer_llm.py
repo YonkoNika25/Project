@@ -36,6 +36,8 @@ def _build_llm_graph_prompt(
     feedback_issues: list[dict],
     attempt_index: int,
 ) -> tuple[str, str]:
+    # Compact draft keeps only anchor evidence and heuristic projection so the model
+    # focuses on structure, not on re-extracting every surface detail from scratch.
     compact_draft = _build_compact_draft(heuristic_problem, heuristic_evidence)
     system_prompt = (
         "You are a math problem formalizer. Return only a compact semantic sketch JSON object, not the final "
@@ -92,6 +94,7 @@ def _llm_formalize_problem(
     heuristic_evidence: dict,
     llm_client: LLMClient,
 ) -> FormalizedProblem:
+    # Feedback is populated by the previous failed attempt and fed into the next prompt.
     feedback_issues: list[dict] = []
     last_validation_result = _missing_graph_validation_result()
 
@@ -111,17 +114,21 @@ def _llm_formalize_problem(
             max_tokens=10000,
         )
         payload["problem_text"] = problem_text.strip()
+        # Preserve attempt trace in final notes for debugging/reproducibility.
         notes = list(payload.get("notes", []))
         notes.append(f"llm_formalization_attempt:{attempt_index}")
         payload["notes"] = notes
 
         try:
+            # Compile semantic sketch -> typed FormalizedProblem + typed graph.
             refined = _build_formalized_problem_from_skeleton(problem_text, heuristic_problem, payload)
         except ValidationError as exc:
+            # Schema/type mismatch in the sketch.
             last_validation_result = _schema_validation_result(exc)
             feedback_issues = _graph_feedback_payload(last_validation_result)
             continue
         except (ValueError, TypeError) as exc:
+            # Build-time semantic/runtime guard failed while compiling the sketch.
             last_validation_result = GraphValidationResult(
                 is_valid=False,
                 issues=[
@@ -142,8 +149,10 @@ def _llm_formalize_problem(
             feedback_issues = _graph_feedback_payload(last_validation_result)
             continue
 
+        # Runtime graph validator ensures executable order and target reachability.
         last_validation_result = validate_problem_graph(refined)
         if last_validation_result.is_valid:
+            # Semantic sanity check catches domain-shape mismatches not captured by graph validator.
             semantic_validation = _semantic_sanity_validation_result(refined)
             if not semantic_validation.is_valid:
                 last_validation_result = semantic_validation
@@ -158,6 +167,7 @@ def _llm_formalize_problem(
 
         feedback_issues = _graph_feedback_payload(last_validation_result)
 
+    # All attempts failed -> deterministic fallback with aggregated issue notes.
     issue_notes = [f"graph_issue:{issue.code}" for issue in last_validation_result.issues]
     fallback_notes = list(heuristic_problem.notes) + issue_notes + ["llm_formalization_failed_fallback"]
     return heuristic_problem.model_copy(update={"notes": fallback_notes})

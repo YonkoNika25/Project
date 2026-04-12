@@ -39,6 +39,7 @@ def _quantity_has_unit_candidate(quantity: QuantityAnnotation, candidate: str) -
 
 
 def _resolved_relation(problem: FormalizedProblem):
+    # Heuristic relation candidates are accepted only when they are confident and not ambiguous.
     if not problem.relation_candidates:
         return None
     primary = problem.relation_candidates[0]
@@ -545,6 +546,7 @@ def build_problem_graph(problem: FormalizedProblem) -> ProblemGraph:
     relation = _resolved_relation(problem)
     relation_type = relation.relation_type if relation is not None else RelationType.UNKNOWN
 
+    # Route to the matching graph template by relation family.
     if relation_type == RelationType.RATE_UNIT_RELATION:
         _add_rate_subgraph(problem, nodes, edges, seen_node_ids, seen_edge_ids, notes)
     elif relation_type in (
@@ -563,6 +565,7 @@ def build_problem_graph(problem: FormalizedProblem) -> ProblemGraph:
             notes=notes,
         )
     else:
+        # Last-resort path: try using relation.expression as a derivation step.
         _add_expression_fallback_subgraph(problem, nodes, edges, seen_node_ids, seen_edge_ids, notes)
 
     confidence = 0.35 if not any(node.node_type == ProblemGraphNodeType.OPERATION for node in nodes) else 0.9

@@ -117,6 +117,7 @@ def build_student_work_graph(
     provenance_override: ProvenanceSource | None = None,
 ) -> ProblemGraph | None:
     """Construct a comparable graph representation for student work."""
+    # Skip graph creation only when the answer has no parseable numeric structure at all.
     has_structured_step = any(
         step.extracted_value is not None or (step.operation is not None and step.operation != TraceOperation.UNKNOWN)
         for step in student_work.steps
@@ -161,6 +162,7 @@ def build_student_work_graph(
         )
 
         input_refs_for_graph: list[str] = list(step.referenced_ids)
+        # Backfill implicit dependencies by matching numeric inputs to previous step outputs.
         for input_value in step.input_values:
             matched_source = next(
                 (
@@ -226,6 +228,7 @@ def build_student_work_graph(
 
     target_node_id = None
     if student_work.normalized_final_answer is not None:
+        # Final answer is always materialized as a target node to ease alignment/evidence.
         target_node_id = "student_final_answer"
         target_notes = []
         if student_work.selected_target_ref is not None:

@@ -34,6 +34,7 @@ def _build_llm_student_prompt(
     feedback_issues: list[dict],
     attempt_index: int,
 ) -> tuple[str, str]:
+    # Compact draft provides grounded candidate spans/refs so the model stays faithful.
     compact_draft = _build_compact_student_draft(heuristic_state, problem=problem)
     allowed_refs = _allowed_student_refs(problem)
     system_prompt = (
@@ -103,6 +104,7 @@ def _llm_formalize_student_work(
     reference: CanonicalReference | None,
     llm_client: LLMClient,
 ) -> StudentWorkState:
+    # Retry loop with validation feedback from the previous failed attempt.
     feedback_issues: list[dict] = []
     last_validation_result = _student_missing_validation_result()
 
@@ -124,6 +126,7 @@ def _llm_formalize_student_work(
         payload["notes"] = list(payload.get("notes", [])) + [f"llm_student_parse_attempt:{attempt_index}"]
 
         try:
+            # Compile semantic sketch -> typed StudentWorkState + student graph.
             refined = _build_student_work_from_sketch(
                 raw_answer,
                 heuristic_state,
@@ -135,6 +138,7 @@ def _llm_formalize_student_work(
             feedback_issues = _student_feedback_payload(last_validation_result)
             continue
 
+        # Sanity validation verifies refs/mode/graph consistency.
         last_validation_result = _student_sanity_validation_result(refined, problem=problem, reference=reference)
         if last_validation_result.is_valid:
             success_notes = list(refined.notes)
@@ -148,6 +152,7 @@ def _llm_formalize_student_work(
 
         feedback_issues = _student_feedback_payload(last_validation_result)
 
+    # All retries failed -> return deterministic heuristic anchor state.
     fallback_notes = list(heuristic_state.notes)
     fallback_notes.extend(f"student_graph_issue:{issue.code}" for issue in last_validation_result.issues)
     fallback_notes.append("llm_student_parse_failed_fallback")

@@ -38,6 +38,7 @@ def strip_reference_markers(solution_text: str) -> list[str]:
 
 
 def parse_trace_step(line: str, step_index: int, final_value: float | None) -> TraceStep:
+    # Priority parse: percent-of form, then binary equation, then fallback numeric derive.
     percent_match = _PERCENT_OF_PATTERN.search(line)
     if percent_match:
         rate = float(percent_match.group(1).replace(",", ""))
@@ -115,6 +116,7 @@ def build_reference_trace(reference_solution_text: str, target_text: str = "") -
             provenance=ProvenanceSource.UNKNOWN,
         )
 
+    # Seed final value from trailing number in the last line when available.
     final_value = None
     trailing_numbers = _NUMBER_PATTERN.findall(lines[-1])
     if trailing_numbers:
@@ -166,6 +168,7 @@ def build_student_partial_trace(student_solution_text: str, target_text: str = "
             provenance=ProvenanceSource.UNKNOWN,
         )
 
+    # Student traces are lower-confidence and allow unknown operations.
     final_value = None
     trailing_numbers = _NUMBER_PATTERN.findall(lines[-1])
     if trailing_numbers:

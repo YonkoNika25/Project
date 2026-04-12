@@ -32,6 +32,7 @@ def _student_sanity_validation_result(
     problem: FormalizedProblem | None,
     reference: CanonicalReference | None,
 ) -> GraphValidationResult:
+    # Cross-field consistency checks for refs, mode, and graph presence.
     issues: list[GraphValidationIssue] = []
     allowed_problem_refs: set[str] = set()
 

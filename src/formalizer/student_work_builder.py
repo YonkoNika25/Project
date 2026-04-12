@@ -221,6 +221,7 @@ def _heuristic_formalize_student_work(
     problem: FormalizedProblem | None = None,
     reference: CanonicalReference | None = None,
 ) -> StudentWorkState:
+    # Heuristic anchor extraction: final answer + step spans + lightweight trace parse.
     cleaned_answer = (raw_answer or "").strip()
     final_answer, final_answer_notes = _extract_final_answer(cleaned_answer)
     steps, trace_notes = _build_step_attempts(cleaned_answer, problem)
@@ -517,6 +518,7 @@ def _build_student_steps_from_sketch(
     problem: FormalizedProblem | None,
     semantic_fact_values: dict[str, float],
 ) -> list[StudentStepAttempt]:
+    # Compile LLM trace_steps into typed StudentStepAttempt objects with grounding checks.
     requested_mode = StudentWorkMode(sketch.get("mode", heuristic_state.mode))
     trace_steps = sketch.get("trace_steps", [])
     if trace_steps is None:
@@ -546,6 +548,7 @@ def _build_student_steps_from_sketch(
                 seen_refs.add(ref_id)
 
         surface_text = _resolve_step_surface_text(raw_answer, heuristic_state, raw_step, index - 1)
+        # Drop ungrounded numeric claims and repair confidence if needed.
         sanitized_step_payload, _ = _sanitize_student_step_payload(
             raw_step,
             surface_text=surface_text,
@@ -575,6 +578,7 @@ def _build_student_work_from_sketch(
     sketch: dict,
     problem: FormalizedProblem | None = None,
 ) -> StudentWorkState:
+    # 1) Compile semantic facts + steps from sketch with strict ref constraints.
     allowed_problem_refs = set(_allowed_student_refs(problem))
     requested_mode = StudentWorkMode(sketch.get("mode", heuristic_state.mode))
     all_semantic_facts = _build_student_semantic_facts_from_sketch(sketch)
@@ -653,6 +657,7 @@ def _build_student_work_from_sketch(
     except ValidationError as exc:
         raise exc
 
+    # 2) Attach a graph artifact so downstream diagnosis/evidence can align against steps.
     return _attach_student_graph(merged_state, problem=problem, provenance_override=ProvenanceSource.LLM)
 
 

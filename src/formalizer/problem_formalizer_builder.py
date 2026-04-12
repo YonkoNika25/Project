@@ -72,6 +72,7 @@ def _normalize_graph_steps_for_builder(
     target_variable: str | None,
     target_quantity_id: str | None,
 ) -> tuple[list[dict], list[str]]:
+    # Normalize textual refs from LLM so downstream graph compilation uses stable ids.
     normalized_steps: list[dict] = []
     notes: list[str] = []
 
@@ -95,6 +96,8 @@ def _normalize_graph_steps_for_builder(
     if target_variable in produced_refs:
         return normalized_steps, notes
 
+    # If the last produced ref looks like a temporary quantity id, retarget it to the
+    # canonical target variable so graph_target stays consistent.
     last_output_ref = str(normalized_steps[-1].get("output_ref", "")).strip()
     if not last_output_ref:
         return normalized_steps, notes
@@ -395,6 +398,7 @@ def _build_problem_graph_from_skeleton(
     graph_confidence: float,
     graph_notes: list[str],
 ) -> ProblemGraph:
+    # Build typed graph from the sketch skeleton while reusing validated entities/quantities.
     nodes: list[ProblemGraphNode] = []
     edges: list[ProblemGraphEdge] = []
 
@@ -563,6 +567,7 @@ def _build_formalized_problem_from_skeleton(
     heuristic_problem: FormalizedProblem,
     payload: dict,
 ) -> FormalizedProblem:
+    # 1) Compile semantic pieces (quantities/target/relation) from sketch.
     notes = list(heuristic_problem.notes)
     notes.extend(_coerce_list_of_strings(payload.get("notes")))
     quantities = _compile_quantities_from_semantic_sketch(heuristic_problem, payload, notes)
@@ -605,7 +610,9 @@ def _build_formalized_problem_from_skeleton(
         provenance=ProvenanceSource.LLM,
         notes=notes,
     )
+    # 2) Validate typed object before attaching graph.
     problem = validate_formalized_problem(problem)
+    # 3) Build typed graph skeleton from plan_steps then apply local semantic repairs.
     graph = _build_problem_graph_from_skeleton(
         problem=problem,
         graph_steps=graph_steps,
@@ -615,6 +622,7 @@ def _build_formalized_problem_from_skeleton(
     )
     problem = problem.model_copy(update={"problem_graph": graph})
     problem = _apply_local_semantic_repairs(problem)
+    # 4) Track deltas against heuristic baseline for debugging and quality auditing.
     comparison_notes = _compare_with_heuristic_notes(problem, heuristic_problem)
     if comparison_notes:
         problem = problem.model_copy(update={"notes": list(problem.notes) + comparison_notes})
@@ -627,6 +635,7 @@ def _attach_problem_graph(problem: FormalizedProblem) -> FormalizedProblem:
 
 
 def _heuristic_formalize_problem(problem_text: str) -> tuple[FormalizedProblem, dict]:
+    # Surface-evidence extraction pass: spans, numbers, cues, relation hints, entities.
     cleaned_text = (problem_text or "").strip()
     evidence_pack = _build_problem_anchor_evidence(cleaned_text)
     target_text = _extract_target_text(cleaned_text)
@@ -655,6 +664,7 @@ def _heuristic_formalize_problem(problem_text: str) -> tuple[FormalizedProblem, 
         notes.append("target_candidate_selected")
     notes.extend(relation_notes)
 
+    # Heuristic projection from evidence -> typed FormalizedProblem components.
     problem = FormalizedProblem(
         problem_text=cleaned_text,
         quantities=quantities,
@@ -667,4 +677,5 @@ def _heuristic_formalize_problem(problem_text: str) -> tuple[FormalizedProblem, 
         notes=notes,
     )
     validated = validate_formalized_problem(problem)
+    # Always attach a deterministic graph so downstream modules can run without LLM.
     return _attach_problem_graph(validated), evidence_pack
