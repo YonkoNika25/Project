@@ -1,7 +1,5 @@
-"""Builders for heuristic drafts and semantic-sketch compilation."""
+"""Builders for heuristic drafts and semantic-state compilation."""
 from __future__ import annotations
-
-import re
 
 from src.formalizer.problem_graph import build_problem_graph
 from src.formalizer.problem_formalizer_extractors import (
@@ -20,13 +18,13 @@ from src.formalizer.problem_formalizer_validation import (
     _apply_local_semantic_repairs,
     _coerce_list_of_strings,
     _compare_with_heuristic_notes,
-    _sanitize_latent_quantity_payload,
     _sanitize_quantity_update,
     validate_formalized_problem,
 )
 from src.models import (
     FormalizedProblem,
     OperationType,
+    ProblemEntity,
     ProblemGraph,
     ProblemGraphEdge,
     ProblemGraphEdgeType,
@@ -41,12 +39,23 @@ from src.models import (
     TraceOperation,
 )
 
+_NULLISH_TEXT = {"", "none", "null", "n/a", "na"}
+
 
 def _normalize_step_expression(expression: object) -> str:
     text = str(expression or "").strip()
     if "=" in text:
         _, rhs = text.split("=", 1)
         text = rhs.strip()
+    return text
+
+
+def _normalize_optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in _NULLISH_TEXT:
+        return None
     return text
 
 
@@ -62,8 +71,20 @@ def _normalize_relation_expression(expression: object) -> str | None:
     return text
 
 
-def _looks_like_generated_quantity_id(ref: str) -> bool:
-    return bool(re.fullmatch(r"quantity_\d+", ref or ""))
+def _coerce_relation_type(value: object) -> str:
+    text = _normalize_optional_text(value)
+    try:
+        return RelationType(text or RelationType.UNKNOWN.value).value
+    except ValueError:
+        return RelationType.UNKNOWN.value
+
+
+def _coerce_operation_hint(value: object) -> str:
+    text = _normalize_optional_text(value)
+    try:
+        return OperationType(text or OperationType.UNKNOWN.value).value
+    except ValueError:
+        return OperationType.UNKNOWN.value
 
 
 def _normalize_graph_steps_for_builder(
@@ -74,12 +95,15 @@ def _normalize_graph_steps_for_builder(
 ) -> tuple[list[dict], list[str]]:
     normalized_steps: list[dict] = []
     notes: list[str] = []
+    produced_refs: set[str] = set()
+    seen_step_ids: set[str] = set()
 
     for step in graph_steps:
         normalized_step = dict(step)
         normalized_step["expression"] = _normalize_step_expression(step.get("expression"))
         normalized_inputs = [str(ref).strip() for ref in step.get("input_refs", []) if str(ref).strip()]
         normalized_output_ref = str(step.get("output_ref", "")).strip()
+        step_id = str(step.get("step_id", "")).strip()
         if target_variable:
             normalized_inputs = [target_variable if ref == "target" else ref for ref in normalized_inputs]
             if normalized_output_ref == "target":
@@ -87,173 +111,230 @@ def _normalize_graph_steps_for_builder(
         normalized_step["input_refs"] = normalized_inputs
         normalized_step["output_ref"] = normalized_output_ref
         normalized_steps.append(normalized_step)
+        if step_id:
+            seen_step_ids.add(step_id)
+        if normalized_output_ref:
+            produced_refs.add(normalized_output_ref)
 
-    if not normalized_steps or not target_variable:
-        return normalized_steps, notes
+    if (
+        target_variable
+        and target_quantity_id
+        and target_variable not in produced_refs
+        and target_quantity_id in produced_refs
+    ):
+        next_step_index = 1 + max(
+            (int(step.get("step_index", 0) or 0) for step in normalized_steps),
+            default=0,
+        )
+        alias_step_id = "bind_target_variable"
+        suffix = 2
+        while alias_step_id in seen_step_ids:
+            alias_step_id = f"bind_target_variable_{suffix}"
+            suffix += 1
+        normalized_steps.append(
+            {
+                "step_id": alias_step_id,
+                "step_index": next_step_index,
+                "operation": TraceOperation.DERIVE.value,
+                "label": "Bind target variable to the declared target quantity.",
+                "input_refs": [target_quantity_id],
+                "output_ref": target_variable,
+                "expression": target_quantity_id,
+                "confidence": 0.85,
+            }
+        )
+        notes.append(f"local_target_binding:{target_quantity_id}->{target_variable}")
 
-    produced_refs = [step.get("output_ref") for step in normalized_steps if step.get("output_ref")]
-    if target_variable in produced_refs:
-        return normalized_steps, notes
-
-    last_output_ref = str(normalized_steps[-1].get("output_ref", "")).strip()
-    if not last_output_ref:
-        return normalized_steps, notes
-
-    should_retarget = False
-    if target_quantity_id and last_output_ref == target_quantity_id:
-        should_retarget = True
-    elif _looks_like_generated_quantity_id(last_output_ref):
-        should_retarget = True
-
-    if not should_retarget:
-        return normalized_steps, notes
-
-    for step in normalized_steps:
-        if step.get("output_ref") == last_output_ref:
-            step["output_ref"] = target_variable
-        step["input_refs"] = [target_variable if ref == last_output_ref else ref for ref in step.get("input_refs", [])]
-        expression = str(step.get("expression", "")).strip()
-        if expression:
-            step["expression"] = re.sub(rf"\b{re.escape(last_output_ref)}\b", target_variable, expression)
-
-    notes.append(f"local_graph_repair:retargeted_output_ref:{last_output_ref}->{target_variable}")
     return normalized_steps, notes
 
 
 def _build_target_payload_from_sketch(
-    heuristic_problem: FormalizedProblem,
     payload: dict,
 ) -> dict:
-    target_payload = heuristic_problem.target.model_dump(mode="json") if heuristic_problem.target is not None else {}
     target_block = payload.get("target")
-    source = target_block if isinstance(target_block, dict) else None
-    if isinstance(source, dict):
-        target_payload.update(
-            {
-                key: value
-                for key, value in source.items()
-                if key
-                in {
-                    "surface_text",
-                    "normalized_question",
-                    "target_variable",
-                    "target_quantity_id",
-                    "entity_id",
-                    "unit",
-                    "description",
-                    "confidence",
-                }
-            }
-        )
+    if not isinstance(target_block, dict):
+        raise ValueError("semantic state payload must include a target object")
+    target_payload = {
+        key: value
+        for key, value in target_block.items()
+        if key
+        in {
+            "surface_text",
+            "normalized_question",
+            "target_variable",
+            "target_quantity_id",
+            "entity_id",
+            "unit",
+            "description",
+            "confidence",
+        }
+    }
+    if "target_quantity_id" in target_payload:
+        target_payload["target_quantity_id"] = _normalize_optional_text(target_payload.get("target_quantity_id"))
+    if "entity_id" in target_payload:
+        target_payload["entity_id"] = _normalize_optional_text(target_payload.get("entity_id"))
+    if "unit" in target_payload:
+        target_payload["unit"] = _normalize_optional_text(target_payload.get("unit"))
     return target_payload
 
 
-def _build_relation_candidates_from_sketch(
-    heuristic_problem: FormalizedProblem,
+def _build_relation_candidates_from_semantic_state(
     payload: dict,
     *,
     target_variable: str | None,
     quantities: list[QuantityAnnotation],
 ) -> list[RelationCandidate]:
     relation_block = payload.get("relation")
-    raw_relations = []
+    raw_relations: list[dict] = []
     if isinstance(relation_block, dict):
         raw_relations = [relation_block]
 
-    if raw_relations:
-        relation_candidates: list[RelationCandidate] = []
-        for index, raw_relation in enumerate(raw_relations, start=1):
-            relation_payload = {
-                "relation_id": raw_relation.get("relation_id") or f"relation_{index}",
-                "relation_type": raw_relation.get("relation_type", RelationType.UNKNOWN.value),
-                "operation_hint": raw_relation.get("operation_hint", OperationType.UNKNOWN.value),
-                "source_quantity_ids": raw_relation.get("source_quantity_ids")
-                or [quantity.quantity_id for quantity in quantities],
-                "target_variable": raw_relation.get("target_variable") or target_variable,
-                "expression": _normalize_relation_expression(raw_relation.get("expression")),
-                "rationale": raw_relation.get("rationale"),
-                "confidence": raw_relation.get("confidence", 0.75),
-                "provenance": ProvenanceSource.LLM.value,
-            }
-            relation_candidates.append(RelationCandidate.model_validate(relation_payload))
-        return relation_candidates
+    if not raw_relations:
+        raw_relations = [{}]
 
-    return list(heuristic_problem.relation_candidates)
+    relation_candidates: list[RelationCandidate] = []
+    known_quantity_ids = {quantity.quantity_id for quantity in quantities}
+    for index, raw_relation in enumerate(raw_relations, start=1):
+        raw_source_quantity_ids = raw_relation.get("source_quantity_ids")
+        normalized_source_refs = [
+            ref
+            for ref in (_normalize_optional_text(item) for item in raw_source_quantity_ids or [])
+            if ref is not None and ref in known_quantity_ids
+        ]
+        relation_payload = {
+            "relation_id": raw_relation.get("relation_id") or f"relation_{index}",
+            "relation_type": _coerce_relation_type(raw_relation.get("relation_type")),
+            "operation_hint": _coerce_operation_hint(raw_relation.get("operation_hint")),
+            "source_quantity_ids": normalized_source_refs or [quantity.quantity_id for quantity in quantities],
+            "target_variable": target_variable,
+            "expression": None,
+            "rationale": raw_relation.get("rationale"),
+            "confidence": raw_relation.get("confidence", 0.75),
+            "provenance": ProvenanceSource.LLM.value,
+        }
+        relation_candidates.append(RelationCandidate.model_validate(relation_payload))
+    return relation_candidates
 
 
-def _compile_quantities_from_semantic_sketch(
+def _compile_entities_from_semantic_state(
+    payload: dict,
+    notes: list[str],
+) -> list[ProblemEntity]:
+    raw_entities = payload.get("entities")
+    if not isinstance(raw_entities, list):
+        raise ValueError("semantic state payload must include an entities list")
+
+    entities: list[ProblemEntity] = []
+    for raw_entity in raw_entities:
+        if not isinstance(raw_entity, dict):
+            raise ValueError("entities must contain objects only")
+        entity_id = str(raw_entity.get("entity_id", "")).strip()
+        if not entity_id:
+            raise ValueError("each entity must include a non-empty entity_id")
+        surface_text = str(raw_entity.get("surface_text", "")).strip()
+        normalized_name = _normalize_optional_text(raw_entity.get("normalized_name"))
+        if not surface_text and normalized_name is not None:
+            surface_text = normalized_name
+        if not surface_text:
+            raise ValueError(f"entity '{entity_id}' must include surface_text or normalized_name")
+        grounding = _normalize_optional_text(raw_entity.get("grounding"))
+        entity_notes = _coerce_list_of_strings(raw_entity.get("notes"))
+        if grounding:
+            entity_notes.append(f"semantic_state_grounding:{grounding}")
+        entities.append(
+            ProblemEntity.model_validate(
+                {
+                    "entity_id": entity_id,
+                    "surface_text": surface_text,
+                    "normalized_name": normalized_name,
+                    "entity_type": raw_entity.get("entity_type", "unknown"),
+                    "aliases": _coerce_list_of_strings(raw_entity.get("aliases")),
+                    "metadata": {"notes": entity_notes} if entity_notes else {},
+                }
+            )
+        )
+        notes.append(f"llm_entity_defined:{entity_id}")
+
+    return entities
+
+
+def _compile_quantities_from_semantic_state(
     heuristic_problem: FormalizedProblem,
     payload: dict,
     notes: list[str],
 ) -> list[QuantityAnnotation]:
-    quantity_updates_by_id: dict[str, dict] = {}
-    raw_quantity_annotations = payload.get("quantity_annotations")
-    quantity_blocks = []
-    if isinstance(raw_quantity_annotations, list):
-        quantity_blocks = [item for item in raw_quantity_annotations if isinstance(item, dict)]
+    raw_quantities = payload.get("quantities")
+    if not isinstance(raw_quantities, list):
+        raise ValueError("semantic state payload must include a quantities list")
 
-    for raw_update in quantity_blocks:
-        quantity_id = str(raw_update.get("quantity_id", "")).strip()
+    heuristic_quantities_by_id = {
+        quantity.quantity_id: quantity for quantity in heuristic_problem.quantities
+    }
+    quantities: list[QuantityAnnotation] = []
+
+    for raw_quantity in raw_quantities:
+        if not isinstance(raw_quantity, dict):
+            raise ValueError("quantities must contain objects only")
+
+        quantity_id = str(raw_quantity.get("quantity_id", "")).strip()
         if not quantity_id:
-            continue
-        sanitized, invalid_note = _sanitize_quantity_update(raw_update)
+            raise ValueError("each quantity must include a non-empty quantity_id")
+
+        surface_text = str(raw_quantity.get("surface_text", "")).strip()
+        if not surface_text:
+            raise ValueError(f"quantity '{quantity_id}' must include a non-empty surface_text")
+
+        try:
+            value = float(raw_quantity.get("value"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"quantity '{quantity_id}' must include a numeric value") from exc
+
+        sanitized, invalid_note = _sanitize_quantity_update(raw_quantity)
         if invalid_note:
             notes.append(invalid_note)
-        quantity_updates_by_id[quantity_id] = sanitized
 
-    quantities: list[QuantityAnnotation] = []
-    for quantity in heuristic_problem.quantities:
-        update = quantity_updates_by_id.get(quantity.quantity_id, {})
-        quantity_payload = quantity.model_dump(mode="json")
-        quantity_payload.update(
-            {
-                key: value
-                for key, value in update.items()
-                if key in {"unit", "entity_id", "semantic_role", "is_target_candidate"}
-            }
-        )
-        quantities.append(QuantityAnnotation.model_validate(quantity_payload))
-        if update.get("semantic_role") and update.get("semantic_role") != quantity.semantic_role.value:
-            notes.append(
-                f"llm_quantity_role_update:{quantity.quantity_id}:{quantity.semantic_role.value}->{update.get('semantic_role')}"
-            )
+        quantity_notes = _coerce_list_of_strings(raw_quantity.get("notes"))
+        origin = (_normalize_optional_text(raw_quantity.get("origin")) or "").lower()
+        if origin:
+            quantity_notes.append(f"semantic_state_origin:{origin}")
+        grounding = _normalize_optional_text(raw_quantity.get("grounding"))
+        if grounding:
+            quantity_notes.append(f"semantic_state_grounding:{grounding}")
 
-    existing_quantity_ids = {quantity.quantity_id for quantity in quantities}
-    raw_semantic_facts = payload.get("semantic_facts")
-    fact_blocks = []
-    if isinstance(raw_semantic_facts, list):
-        fact_blocks = [item for item in raw_semantic_facts if isinstance(item, dict)]
+        anchor_ref = _normalize_optional_text(raw_quantity.get("evidence_ref")) if origin == "observed" else None
+        if anchor_ref is None and origin == "observed" and quantity_id in heuristic_quantities_by_id:
+            anchor_ref = quantity_id
 
-    for index, raw_fact in enumerate(fact_blocks, start=1):
-        fact_notes = _coerce_list_of_strings(raw_fact.get("notes"))
-        if raw_fact.get("grounding"):
-            fact_notes.extend(_coerce_list_of_strings([raw_fact.get("grounding")]))
-        latent_payload = {
-            "quantity_id": str(raw_fact.get("fact_id", "")).strip()
-            or str(raw_fact.get("quantity_id", "")).strip()
-            or f"latent_quantity_{index}",
-            "surface_text": raw_fact.get("label")
-            or raw_fact.get("surface_text")
-            or str(raw_fact.get("value", "")),
-            "value": raw_fact.get("value"),
-            "unit": raw_fact.get("unit"),
-            "entity_id": raw_fact.get("entity_id"),
-            "semantic_role": raw_fact.get("semantic_role", QuantitySemanticRole.INTERMEDIATE.value),
-            "is_target_candidate": raw_fact.get("is_target_candidate", False),
-            "notes": fact_notes,
+        anchor_quantity = heuristic_quantities_by_id.get(anchor_ref) if anchor_ref else None
+        if anchor_ref:
+            quantity_notes.append(f"semantic_state_evidence_ref:{anchor_ref}")
+
+        quantity_payload = {
+            "quantity_id": quantity_id,
+            "surface_text": surface_text,
+            "value": value,
+            "unit": _normalize_optional_text(raw_quantity.get("unit")),
+            "entity_id": _normalize_optional_text(raw_quantity.get("entity_id")),
+            "semantic_role": sanitized.get("semantic_role", QuantitySemanticRole.UNKNOWN.value),
+            "is_target_candidate": bool(raw_quantity.get("is_target_candidate", False)),
+            "provenance": ProvenanceSource.LLM.value,
+            "notes": quantity_notes,
         }
-        latent_payload, latent_note = _sanitize_latent_quantity_payload(
-            latent_payload,
-            existing_quantity_ids=existing_quantity_ids,
-        )
-        if latent_note:
-            notes.append(latent_note)
-        if latent_payload is None:
-            continue
-        latent_payload["provenance"] = ProvenanceSource.LLM.value
-        quantities.append(QuantityAnnotation.model_validate(latent_payload))
-        existing_quantity_ids.add(latent_payload["quantity_id"])
-        notes.append(f"llm_semantic_fact_added:{latent_payload['quantity_id']}")
+
+        if anchor_quantity is not None:
+            if abs(float(anchor_quantity.value) - float(value)) <= 1e-6:
+                if quantity_payload["unit"] is None:
+                    quantity_payload["unit"] = anchor_quantity.unit
+                quantity_payload["sentence_index"] = anchor_quantity.sentence_index
+                quantity_payload["char_start"] = anchor_quantity.char_start
+                quantity_payload["char_end"] = anchor_quantity.char_end
+                notes.append(f"llm_quantity_grounded_by_anchor:{quantity_id}->{anchor_ref}")
+            else:
+                notes.append(f"ignored_mismatched_anchor:{quantity_id}->{anchor_ref}")
+        elif anchor_ref is not None:
+            notes.append(f"ignored_unknown_anchor:{quantity_id}->{anchor_ref}")
+
+        quantities.append(QuantityAnnotation.model_validate(quantity_payload))
 
     return quantities
 
@@ -265,126 +346,33 @@ def _extract_graph_steps_from_payload(payload: dict) -> list[dict]:
     return []
 
 
+def _merge_semantic_and_commitment_payloads(
+    semantic_payload: dict,
+    commitment_payload: dict,
+) -> dict:
+    merged = dict(semantic_payload)
+    merged.update(commitment_payload)
+
+    merged["notes"] = _coerce_list_of_strings(semantic_payload.get("notes")) + _coerce_list_of_strings(
+        commitment_payload.get("notes")
+    )
+    merged["graph_notes"] = _coerce_list_of_strings(commitment_payload.get("graph_notes"))
+    merged["assumptions"] = _coerce_list_of_strings(commitment_payload.get("assumptions"))
+    merged["plan_steps"] = _extract_graph_steps_from_payload(commitment_payload)
+    merged["graph_target_node_id"] = commitment_payload.get("graph_target_node_id")
+    merged["graph_confidence"] = commitment_payload.get("graph_confidence")
+    merged["confidence"] = commitment_payload.get("confidence", semantic_payload.get("confidence"))
+    return merged
+
+
 def _build_compact_draft(heuristic_problem: FormalizedProblem, evidence_pack: dict) -> dict:
     return {
         "problem_text": heuristic_problem.problem_text,
         "sentence_spans": list(evidence_pack.get("sentence_spans", [])),
         "numeric_mentions": list(evidence_pack.get("numeric_mentions", [])),
         "implicit_quantity_cues": list(evidence_pack.get("implicit_quantity_cues", [])),
-        "lexical_cues": list(evidence_pack.get("lexical_cues", [])),
         "target_span_candidates": list(evidence_pack.get("target_span_candidates", [])),
-        "target_link_candidates": list(evidence_pack.get("target_link_candidates", [])),
-        "relation_candidates": list(evidence_pack.get("relation_candidates", [])),
         "entity_candidates": list(evidence_pack.get("entity_candidates", [])),
-        "heuristic_projection": {
-            "quantities": [
-                {
-                    "quantity_id": quantity.quantity_id,
-                    "surface_text": quantity.surface_text,
-                    "value": quantity.value,
-                    "unit": quantity.unit,
-                    "entity_id": quantity.entity_id,
-                    "semantic_role": quantity.semantic_role.value,
-                    "is_target_candidate": quantity.is_target_candidate,
-                }
-                for quantity in heuristic_problem.quantities
-            ],
-            "target": (
-                {
-                    "surface_text": heuristic_problem.target.surface_text,
-                    "normalized_question": heuristic_problem.target.normalized_question,
-                    "target_variable": heuristic_problem.target.target_variable,
-                    "target_quantity_id": heuristic_problem.target.target_quantity_id,
-                    "entity_id": heuristic_problem.target.entity_id,
-                    "unit": heuristic_problem.target.unit,
-                    "description": heuristic_problem.target.description,
-                }
-                if heuristic_problem.target is not None
-                else None
-            ),
-            "relation_candidates": [
-                {
-                    "relation_id": relation.relation_id,
-                    "relation_type": relation.relation_type.value,
-                    "operation_hint": relation.operation_hint.value,
-                    "source_quantity_ids": list(relation.source_quantity_ids),
-                    "target_variable": relation.target_variable,
-                    "expression": relation.expression,
-                    "rationale": relation.rationale,
-                }
-                for relation in heuristic_problem.relation_candidates
-            ],
-        },
-        "draft_notes": list(heuristic_problem.notes),
-        "resolved_quantities": [
-            {
-                "quantity_id": quantity.quantity_id,
-                "surface_text": quantity.surface_text,
-                "value": quantity.value,
-                "unit": quantity.unit,
-                "entity_id": quantity.entity_id,
-                "semantic_role": quantity.semantic_role.value,
-                "is_target_candidate": quantity.is_target_candidate,
-            }
-            for quantity in heuristic_problem.quantities
-        ],
-        "resolved_entities": [
-            {
-                "entity_id": entity.entity_id,
-                "surface_text": entity.surface_text,
-                "normalized_name": entity.normalized_name,
-                "entity_type": entity.entity_type,
-            }
-            for entity in heuristic_problem.entities
-        ],
-        "resolved_target": (
-            {
-                "surface_text": heuristic_problem.target.surface_text,
-                "normalized_question": heuristic_problem.target.normalized_question,
-                "target_variable": heuristic_problem.target.target_variable,
-                "target_quantity_id": heuristic_problem.target.target_quantity_id,
-                "entity_id": heuristic_problem.target.entity_id,
-                "unit": heuristic_problem.target.unit,
-                "description": heuristic_problem.target.description,
-            }
-            if heuristic_problem.target is not None
-            else None
-        ),
-        "graph_steps": [
-            {
-                "step_id": node.step_id,
-                "step_index": node.step_index,
-                "operation": node.operation.value if node.operation is not None else None,
-                "expression": node.expression,
-                "label": node.label,
-                "input_refs": [
-                    edge.source_node_id
-                    for edge in sorted(
-                        (
-                            edge
-                            for edge in (heuristic_problem.problem_graph.edges if heuristic_problem.problem_graph else [])
-                            if edge.edge_type == ProblemGraphEdgeType.INPUT_TO_OPERATION
-                            and edge.target_node_id == node.node_id
-                        ),
-                        key=lambda edge: edge.position if edge.position is not None else 0,
-                    )
-                ],
-                "output_ref": next(
-                    (
-                        edge.target_node_id
-                        for edge in (heuristic_problem.problem_graph.edges if heuristic_problem.problem_graph else [])
-                        if edge.edge_type == ProblemGraphEdgeType.OUTPUT_FROM_OPERATION
-                        and edge.source_node_id == node.node_id
-                    ),
-                    None,
-                ),
-            }
-            for node in (heuristic_problem.problem_graph.nodes if heuristic_problem.problem_graph else [])
-            if node.node_type == ProblemGraphNodeType.OPERATION
-        ],
-        "graph_target_node_id": (
-            heuristic_problem.problem_graph.target_node_id if heuristic_problem.problem_graph is not None else None
-        ),
     }
 
 
@@ -565,23 +553,19 @@ def _build_formalized_problem_from_skeleton(
 ) -> FormalizedProblem:
     notes = list(heuristic_problem.notes)
     notes.extend(_coerce_list_of_strings(payload.get("notes")))
-    quantities = _compile_quantities_from_semantic_sketch(heuristic_problem, payload, notes)
+    entities = _compile_entities_from_semantic_state(payload, notes)
+    quantities = _compile_quantities_from_semantic_state(heuristic_problem, payload, notes)
     existing_quantity_ids = {quantity.quantity_id for quantity in quantities}
 
-    entities = list(heuristic_problem.entities)
-    target_payload = _build_target_payload_from_sketch(heuristic_problem, payload)
-    target_variable = str(target_payload.get("target_variable", "")).strip() or (
-        heuristic_problem.target.target_variable if heuristic_problem.target is not None else ""
-    )
+    target_payload = _build_target_payload_from_sketch(payload)
+    target_variable = str(target_payload.get("target_variable", "")).strip()
     target_quantity_id = target_payload.get("target_quantity_id")
     if target_quantity_id is not None and target_quantity_id not in existing_quantity_ids:
-        notes.append(f"local_target_repair:cleared_unknown_target_quantity_id:{target_quantity_id}")
-        target_payload["target_quantity_id"] = None
+        raise ValueError(f"target_quantity_id '{target_quantity_id}' does not exist in semantic-state quantities")
     target_payload["provenance"] = ProvenanceSource.LLM.value
     target = TargetSpec.model_validate(target_payload) if target_payload else None
 
-    relation_candidates = _build_relation_candidates_from_sketch(
-        heuristic_problem,
+    relation_candidates = _build_relation_candidates_from_semantic_state(
         payload,
         target_variable=target.target_variable if target is not None else target_variable,
         quantities=quantities,

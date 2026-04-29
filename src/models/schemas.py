@@ -89,6 +89,61 @@ class ErrorLocalization(str, Enum):
     UNKNOWN = "unknown"
 
 
+class AnswerStatus(str, Enum):
+    """Whether the student's final answer is correct, incorrect, or unusable."""
+    CORRECT = "correct"
+    INCORRECT = "incorrect"
+    UNPARSEABLE = "unparseable"
+
+
+class TargetStatus(str, Enum):
+    """Whether the student is aiming at the intended target quantity."""
+    CORRECT = "correct"
+    WRONG = "wrong"
+    UNKNOWN = "unknown"
+
+
+class ReasoningStatus(str, Enum):
+    """Status of a specific reasoning dimension inside diagnosis."""
+    VALID = "valid"
+    INVALID = "invalid"
+    NOT_APPLICABLE = "not_applicable"
+    UNKNOWN = "unknown"
+
+
+class ProcessStatus(str, Enum):
+    """How the student's process relates to the canonical reference."""
+    CANONICAL = "canonical"
+    EQUIVALENT_NONCANONICAL = "equivalent_noncanonical"
+    PARTIAL = "partial"
+    NOISY_BUT_VALID = "noisy_but_valid"
+    INCONSISTENT = "inconsistent"
+    UNKNOWN = "unknown"
+
+
+class AnswerAcceptability(str, Enum):
+    """Whether the student's current answer is acceptable for tutoring purposes."""
+    ACCEPTABLE = "acceptable"
+    UNACCEPTABLE = "unacceptable"
+    UNPARSEABLE = "unparseable"
+
+
+class TargetAlignment(str, Enum):
+    """Whether the student is aligned with the requested target quantity."""
+    ALIGNED = "aligned"
+    MISALIGNED = "misaligned"
+    UNKNOWN = "unknown"
+
+
+class ProcessEquivalence(str, Enum):
+    """How the student's process compares to the canonical reference without implying error by default."""
+    CANONICAL = "canonical"
+    EQUIVALENT_NONCANONICAL = "equivalent_noncanonical"
+    PARTIAL_OR_NOISY_BUT_ACCEPTABLE = "partial_or_noisy_but_acceptable"
+    INCONSISTENT = "inconsistent"
+    UNKNOWN = "unknown"
+
+
 class HintLevel(str, Enum):
     """Pedagogical hint granularity."""
     CONCEPTUAL = "conceptual"

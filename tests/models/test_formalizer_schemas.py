@@ -5,6 +5,7 @@ from src.models import (
     DiagnosisEvidence,
     DiagnosisLabel,
     DiagnosisResult,
+    DisclosurePolicy,
     ErrorLocalization,
     ExecutablePlan,
     ExecutableStep,
@@ -19,7 +20,10 @@ from src.models import (
     ProblemGraphNodeType,
     HintLevel,
     HintPlan,
+    InterventionPosture,
     OperationType,
+    PedagogicalObjective,
+    PedagogyState,
     ProblemEntity,
     ProvenanceSource,
     QuantityAnnotation,
@@ -29,6 +33,7 @@ from src.models import (
     StudentStepAttempt,
     StudentWorkMode,
     StudentWorkState,
+    StepGroundingRequirement,
     TargetSpec,
     TeacherMove,
     TraceOperation,
@@ -428,3 +433,22 @@ def test_hint_plan_rejects_focus_points_when_budget_is_zero():
             focus_points=["something"],
             rationale="none",
         )
+
+
+def test_pedagogy_state_accepts_common_typo_alias_for_uncertain_concerns():
+    state = PedagogyState.model_validate(
+        {
+            "intervention_posture": InterventionPosture.CORRECTIVE.value,
+            "primary_objective": PedagogicalObjective.REFOCUS_TARGET.value,
+            "disclosure_policy": DisclosurePolicy.LOW.value,
+            "step_grounding_requirement": StepGroundingRequirement.OPTIONAL.value,
+            "uncertain_pedagogical_conerns": ["student may be tracking the wrong quantity"],
+            "pedagogical_goal": "Refocus the student on the requested quantity.",
+            "student_action": "Re-identify what the question asks for.",
+            "rationale": "The student appears to stop at an intermediate quantity.",
+            "confidence": 0.8,
+            "notes": ["schema_alias_test"],
+        }
+    )
+
+    assert state.uncertain_pedagogical_concerns == ["student may be tracking the wrong quantity"]

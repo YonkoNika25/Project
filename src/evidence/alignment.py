@@ -184,16 +184,20 @@ def _local_match_score(
 ) -> tuple[float, list[str]]:
     score = 0.0
     reasons: list[str] = []
+    overlap = sorted(set(student_step.input_refs).intersection(reference_step.input_refs))
 
     if values_match(student_step.output_value, reference_step.output_value):
         score += 6.0
         reasons.append("output_value_match")
 
-    if student_step.operation != TraceOperation.UNKNOWN and student_step.operation == reference_step.operation:
+    if (
+        student_step.operation != TraceOperation.UNKNOWN
+        and student_step.operation == reference_step.operation
+        and (student_step.output_value is not None or overlap)
+    ):
         score += 3.0
         reasons.append("operation_match")
 
-    overlap = sorted(set(student_step.input_refs).intersection(reference_step.input_refs))
     if overlap:
         score += min(2.0, float(len(overlap)))
         reasons.append(f"input_overlap:{','.join(overlap)}")
@@ -227,6 +231,8 @@ def global_align_student_steps(
             if used_mask & (1 << ref_index):
                 continue
             local_score = score_matrix[student_index][ref_index]
+            if local_score <= 0.0:
+                continue
             downstream_score, downstream_pairs = _solve(student_index + 1, used_mask | (1 << ref_index))
             candidate_score = local_score + downstream_score
             if candidate_score > best_score:
@@ -267,11 +273,9 @@ def global_align_student_steps(
         reference_step = reference_payload[ref_index]
         score, reasons = _local_match_score(student_step, reference_step)
         mapped_student_deps = {
-            reverse_pair.get(dep_step_id)
+            reverse_pair.get(dep_step_id, f"student:{dep_step_id}")
             for dep_step_id in student_step.dependency_step_ids
-            if dep_step_id in reverse_pair
         }
-        mapped_student_deps.discard(None)
         reference_deps = set(reference_step.dependency_step_ids)
         dependency_overlap = sorted(mapped_student_deps.intersection(reference_deps))
         missing_dependencies = sorted(reference_deps - mapped_student_deps)

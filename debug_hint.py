@@ -10,13 +10,13 @@ from typing import Any
 
 import requests
 
-from src.diagnosis import diagnose
-from src.evidence import build_diagnosis_evidence
+from src.diagnosis import build_diagnosis
+from src.evidence import build_diagnosis_context, build_diagnosis_evidence
 from src.formalizer import formalize_problem, formalize_student_work
 from src.hint import build_hint_result
 from src.llm import LLMClient, LLMGenerationError, OpenRouterLLMClient, build_default_llm_client
 from src.models import HintMode
-from src.pedagogy import build_hint_plan
+from src.pedagogy import build_pedagogy_artifacts
 from src.runtime import build_canonical_reference
 
 
@@ -231,13 +231,15 @@ def main() -> list[dict[str, Any]]:
     reference = build_canonical_reference(problem)
     student = formalize_student_work(STUDENT_ANSWER, problem=problem, reference=reference)
     evidence = build_diagnosis_evidence(problem, reference, student)
-    diagnosis = diagnose(evidence)
-    plan = build_hint_plan(problem, reference, diagnosis)
+    diagnosis_context = build_diagnosis_context(problem, reference, student, evidence)
+    diagnosis_state, diagnosis = build_diagnosis(evidence, context=diagnosis_context)
+    pedagogy_state, strategy, plan = build_pedagogy_artifacts(problem, reference, diagnosis, diagnosis_state)
     deterministic_hint = build_hint_result(
         problem,
         reference,
         diagnosis,
         plan,
+        strategy=strategy,
         hint_mode=HINT_MODE,
         llm_client=None,
     )
@@ -252,6 +254,7 @@ def main() -> list[dict[str, Any]]:
             reference,
             diagnosis,
             plan,
+            strategy=strategy,
             hint_mode=HINT_MODE,
             llm_client=recording_client,
         )
@@ -260,7 +263,10 @@ def main() -> list[dict[str, Any]]:
     )
 
     _print_json("Input", {"problem_text": PROBLEM_TEXT, "student_answer": STUDENT_ANSWER})
+    _print_json("Diagnosis State", diagnosis_state.model_dump(mode="json"))
     _print_json("Diagnosis", diagnosis.model_dump(mode="json"))
+    _print_json("Pedagogy State", pedagogy_state.model_dump(mode="json"))
+    _print_json("Hint Strategy", strategy.model_dump(mode="json"))
     _print_json("Hint Plan", plan.model_dump(mode="json"))
     _print_json("Deterministic Hint", deterministic_hint.model_dump(mode="json"))
     _print_json("Final Hint", final_hint.model_dump(mode="json"))

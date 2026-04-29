@@ -6,10 +6,10 @@ import json
 from src.llm import LLMClient, LLMGenerationError
 from src.models import (
     CanonicalReference,
-    DiagnosisResult,
     FormalizedProblem,
     HintMode,
     HintPlan,
+    HintStrategy,
     TeacherMove,
 )
 
@@ -23,8 +23,11 @@ def _target_prompt(problem: FormalizedProblem) -> str:
 def _deterministic_hint_text(
     problem: FormalizedProblem,
     plan: HintPlan,
+    strategy: HintStrategy | None = None,
 ) -> str:
     target_prompt = _target_prompt(problem)
+    focus_points = strategy.focus_points if strategy is not None and strategy.focus_points else plan.focus_points
+    student_action = strategy.student_action if strategy is not None else None
 
     if plan.teacher_move == TeacherMove.RESTATE_RESULT:
         return "Your answer is correct."
@@ -38,7 +41,11 @@ def _deterministic_hint_text(
     if plan.teacher_move == TeacherMove.CHECK_RELATIONSHIP:
         return (
             "Before calculating again, decide how the quantities should be related. "
-            "Ask whether this step should combine, compare, or apply a rate to the values in the problem."
+            + (
+                f"Focus on {focus_points[0].lower()}."
+                if focus_points
+                else "Ask whether this step should combine, compare, or apply a rate to the values in the problem."
+            )
         )
 
     if plan.teacher_move == TeacherMove.RECOMPUTE_STEP:
@@ -50,7 +57,11 @@ def _deterministic_hint_text(
     if plan.teacher_move == TeacherMove.CONTINUE_FROM_STEP:
         return (
             "Your setup looks close, so pause before the last computation. "
-            "Use the quantities you already found and recompute the final step carefully."
+            + (
+                student_action
+                if student_action
+                else "Use the quantities you already found and recompute the final step carefully."
+            )
         )
 
     if plan.teacher_move == TeacherMove.METACOGNITIVE_PROMPT:
@@ -68,8 +79,8 @@ def _deterministic_hint_text(
 def _llm_hint_text(
     problem: FormalizedProblem,
     reference: CanonicalReference,
-    diagnosis: DiagnosisResult,
     plan: HintPlan,
+    strategy: HintStrategy | None,
     hint_mode: HintMode,
     llm_client: LLMClient,
 ) -> str:
@@ -79,8 +90,8 @@ def _llm_hint_text(
     )
     user_prompt = (
         f"Problem target:\n{_target_prompt(problem)}\n\n"
-        f"Diagnosis:\n{json.dumps(diagnosis.model_dump(mode='json'), ensure_ascii=True)}\n\n"
-        f"Pedagogy plan:\n{json.dumps(plan.model_dump(mode='json'), ensure_ascii=True)}\n\n"
+        f"Hint strategy:\n{json.dumps(strategy.model_dump(mode='json'), ensure_ascii=True) if strategy is not None else 'null'}\n\n"
+        f"Compatibility hint plan:\n{json.dumps(plan.model_dump(mode='json'), ensure_ascii=True)}\n\n"
         f"Reference answer (must not be revealed): {reference.final_answer:g}\n"
         f"Hint mode: {hint_mode.value}\n\n"
         "Return JSON like {\"hint_text\": \"...\"}."
@@ -101,16 +112,16 @@ def _llm_hint_text(
 def generate_hint_text(
     problem: FormalizedProblem,
     reference: CanonicalReference,
-    diagnosis: DiagnosisResult,
     plan: HintPlan,
+    strategy: HintStrategy | None = None,
     hint_mode: HintMode = HintMode.NORMAL,
     llm_client: LLMClient | None = None,
 ) -> str:
     """Generate a short hint from the pedagogy plan."""
     if llm_client is None:
-        return _deterministic_hint_text(problem, plan)
+        return _deterministic_hint_text(problem, plan, strategy=strategy)
 
     try:
-        return _llm_hint_text(problem, reference, diagnosis, plan, hint_mode, llm_client)
-    except (LLMGenerationError, ValueError, TypeError):
-        return _deterministic_hint_text(problem, plan)
+        return _llm_hint_text(problem, reference, plan, strategy, hint_mode, llm_client)
+    except (LLMGenerationError, ValueError, TypeError, KeyError):
+        return _deterministic_hint_text(problem, plan, strategy=strategy)

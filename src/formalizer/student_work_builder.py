@@ -22,12 +22,30 @@ from src.models import (
 
 
 _NUMBER_PATTERN = re.compile(r"-?\d[\d,]*\.?\d*")
+_FRACTION_PATTERN = re.compile(r"(?<!\d)(-?\d+)\s*/\s*(\d+)(?!\d)")
+_PERCENT_PATTERN = re.compile(r"(-?\d[\d,]*\.?\d*)\s*%")
 _HASH_PATTERN = re.compile(r"####\s*(-?\d[\d,]*\.?\d*)")
 _ANSWER_PATTERN = re.compile(
-    r"(?:answer|final answer|result|total)\s*(?:is|=|:)?\s*(-?\d[\d,]*\.?\d*)",
+    r"(?:answer|final answer)\s*(?:is|=|:)?\s*(-?\d[\d,]*\.?\d*)",
     re.IGNORECASE,
 )
+_GET_ANSWER_PATTERN = re.compile(
+    r"(?:so\s+)?i\s+(?:get|got)\s*(-?\d[\d,]*\.?\d*)",
+    re.IGNORECASE,
+)
+_SINGLE_NUMBER_ANSWER_PATTERN = re.compile(r"^\s*(-?\d[\d,]*\.?\d*)\s*\.?\s*$")
 _STEP_SPLIT_PATTERN = re.compile(r"(?:\r?\n)+")
+
+
+def _coerce_list_of_strings(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized] if normalized else []
+    return [str(value).strip()] if str(value).strip() else []
 
 
 def _parse_number(text: str) -> float | None:
@@ -59,15 +77,21 @@ def _extract_final_answer(raw_answer: str) -> tuple[float | None, list[str]]:
             return parsed, ["answer_cue_match"]
         notes.append("answer_cue_unparseable")
 
-    all_numbers = _NUMBER_PATTERN.findall(raw_answer)
-    if all_numbers:
-        parsed = _parse_number(all_numbers[-1])
+    get_match = _GET_ANSWER_PATTERN.search(raw_answer)
+    if get_match:
+        parsed = _parse_number(get_match.group(1))
         if parsed is not None:
-            label = "last_number_selected" if len(all_numbers) == 1 else f"multiple_numbers_found:{len(all_numbers)}"
-            return parsed, [label]
-        notes.append("last_number_unparseable")
+            return parsed, ["get_answer_cue_match"]
+        notes.append("get_answer_cue_unparseable")
 
-    notes.append("no_numeric_candidate")
+    single_number_match = _SINGLE_NUMBER_ANSWER_PATTERN.fullmatch(raw_answer.strip())
+    if single_number_match:
+        parsed = _parse_number(single_number_match.group(1))
+        if parsed is not None:
+            return parsed, ["single_numeric_answer"]
+        notes.append("single_numeric_answer_unparseable")
+
+    notes.append("no_explicit_final_answer")
     return None, notes
 
 
@@ -104,13 +128,84 @@ def _observed_numbers_in_text(text: str) -> list[float]:
         parsed = _parse_number(match)
         if parsed is not None:
             numbers.append(parsed)
+    for numerator_text, denominator_text in _FRACTION_PATTERN.findall(text or ""):
+        numerator = _parse_number(numerator_text)
+        denominator = _parse_number(denominator_text)
+        if numerator is None or denominator in {None, 0.0}:
+            continue
+        numbers.append(float(numerator) / float(denominator))
+    for percent_text in _PERCENT_PATTERN.findall(text or ""):
+        parsed = _parse_number(percent_text)
+        if parsed is None:
+            continue
+        numbers.append(float(parsed) / 100.0)
     return numbers
 
 
 def _known_problem_ref_values(problem: FormalizedProblem | None) -> dict[str, float]:
     if problem is None:
         return {}
-    return {quantity.quantity_id: quantity.value for quantity in problem.quantities}
+    return {quantity.quantity_id: quantity.value for quantity in _visible_problem_quantities(problem)}
+
+
+def _quantity_provenance_value(quantity: object) -> str | None:
+    provenance = getattr(quantity, "provenance", None)
+    if provenance is None:
+        return None
+    if hasattr(provenance, "value"):
+        return str(provenance.value)
+    return str(provenance)
+
+
+def _is_visible_problem_quantity(quantity: object, problem: FormalizedProblem | None) -> bool:
+    if quantity is None:
+        return False
+    char_start = getattr(quantity, "char_start", None)
+    char_end = getattr(quantity, "char_end", None)
+    if char_start is not None and char_end is not None:
+        return True
+
+    provenance_value = _quantity_provenance_value(quantity)
+    if provenance_value == ProvenanceSource.PROBLEM_TEXT.value:
+        return True
+
+    for note in getattr(quantity, "notes", []) or []:
+        if isinstance(note, str) and note.startswith("semantic_state_origin:observed"):
+            return True
+
+    problem_text = problem.problem_text if problem is not None else ""
+    surface_text = getattr(quantity, "surface_text", None)
+    if isinstance(surface_text, str):
+        normalized_surface = _normalize_text_anchor(surface_text)
+        normalized_problem = _normalize_text_anchor(problem_text)
+        if normalized_surface and normalized_problem and normalized_surface in normalized_problem:
+            return True
+
+    return False
+
+
+def _visible_problem_quantities(problem: FormalizedProblem | None) -> list:
+    if problem is None:
+        return []
+    return [quantity for quantity in problem.quantities if _is_visible_problem_quantity(quantity, problem)]
+
+
+def _step_visibly_commits_numeric_result(step: StudentStepAttempt) -> bool:
+    raw_text = step.raw_text or ""
+    if "=" in raw_text:
+        return True
+    if _ANSWER_PATTERN.search(raw_text) or _GET_ANSWER_PATTERN.search(raw_text):
+        return True
+    return _SINGLE_NUMBER_ANSWER_PATTERN.fullmatch(raw_text.strip()) is not None
+
+
+def _derive_visible_final_answer_from_steps(
+    steps: list[StudentStepAttempt],
+) -> tuple[float | None, list[str]]:
+    for step in reversed(steps):
+        if step.extracted_value is not None and _step_visibly_commits_numeric_result(step):
+            return step.extracted_value, ["final_answer_from_last_visible_step"]
+    return None, []
 
 
 def _step_confidence(operation: TraceOperation | None, extracted_value: float | None, raw_text: str) -> float:
@@ -130,7 +225,7 @@ def _referenced_problem_quantity_ids(line: str, problem: FormalizedProblem | Non
     lowered_line = line.lower()
     referenced_ids: list[str] = []
     seen: set[str] = set()
-    for quantity in problem.quantities:
+    for quantity in _visible_problem_quantities(problem):
         mentions_value = quantity.surface_text.lower() in lowered_line or f"{quantity.value:g}" in lowered_line
         if mentions_value and quantity.quantity_id not in seen:
             referenced_ids.append(quantity.quantity_id)
@@ -224,6 +319,11 @@ def _heuristic_formalize_student_work(
     cleaned_answer = (raw_answer or "").strip()
     final_answer, final_answer_notes = _extract_final_answer(cleaned_answer)
     steps, trace_notes = _build_step_attempts(cleaned_answer, problem)
+    if final_answer is None:
+        derived_final_answer, derivation_notes = _derive_visible_final_answer_from_steps(steps)
+        if derived_final_answer is not None:
+            final_answer = derived_final_answer
+            final_answer_notes.extend(derivation_notes)
     mode = _infer_mode(cleaned_answer, steps, final_answer)
     selected_target_ref = _infer_selected_target_ref(final_answer, problem)
 
@@ -292,19 +392,117 @@ def _build_compact_student_draft(
 ) -> dict:
     candidate_spans = _split_student_steps(heuristic_state.raw_answer)
     return {
-        "raw_answer": heuristic_state.raw_answer,
         "observed_final_answer": heuristic_state.normalized_final_answer,
-        "candidate_step_spans": [
+        "candidate_step_count": len(candidate_spans),
+        "candidate_step_hints": [
             {
                 "span_index": index,
-                "surface_text": span,
-                "observed_numbers": [_parse_number(match) for match in _NUMBER_PATTERN.findall(span) if _parse_number(match) is not None],
+                "observed_numbers": [
+                    _parse_number(match)
+                    for match in _NUMBER_PATTERN.findall(span)
+                    if _parse_number(match) is not None
+                ],
                 "referenced_ids": _referenced_problem_quantity_ids(span, problem),
+                "contains_equation": "=" in span,
             }
             for index, span in enumerate(candidate_spans, start=1)
         ],
         "allowed_problem_refs": _allowed_student_refs(problem),
         "heuristic_notes": list(heuristic_state.notes),
+    }
+
+
+def _canonical_student_ref_payloads(
+    problem: FormalizedProblem | None,
+) -> list[dict]:
+    refs: list[dict] = []
+    seen_ref_ids: set[str] = set()
+
+    if problem is not None:
+        for quantity in _visible_problem_quantities(problem):
+            if quantity.quantity_id in seen_ref_ids:
+                continue
+            seen_ref_ids.add(quantity.quantity_id)
+            refs.append(
+                {
+                    "ref_id": quantity.quantity_id,
+                    "kind": "problem_quantity",
+                    "label": quantity.surface_text,
+                    "value": quantity.value,
+                    "unit": quantity.unit,
+                    "semantic_role": quantity.semantic_role.value,
+                }
+            )
+
+        if (
+            problem.target is not None
+            and problem.target.target_quantity_id is not None
+            and problem.target.target_quantity_id not in seen_ref_ids
+        ):
+            target_quantity = next(
+                (quantity for quantity in problem.quantities if quantity.quantity_id == problem.target.target_quantity_id),
+                None,
+            )
+            seen_ref_ids.add(problem.target.target_quantity_id)
+            refs.append(
+                {
+                    "ref_id": problem.target.target_quantity_id,
+                    "kind": "problem_target_quantity",
+                    "label": (
+                        target_quantity.surface_text
+                        if target_quantity is not None and target_quantity.surface_text
+                        else problem.target.description or problem.target.surface_text
+                    ),
+                    "value": (
+                        target_quantity.value
+                        if target_quantity is not None and _is_visible_problem_quantity(target_quantity, problem)
+                        else None
+                    ),
+                    "unit": (
+                        target_quantity.unit
+                        if target_quantity is not None and target_quantity.unit is not None
+                        else problem.target.unit
+                    ),
+                    "semantic_role": (
+                        target_quantity.semantic_role.value
+                        if target_quantity is not None
+                        else None
+                    ),
+                }
+            )
+
+        if problem.target is not None and problem.target.target_variable not in seen_ref_ids:
+            seen_ref_ids.add(problem.target.target_variable)
+            refs.append(
+                {
+                    "ref_id": problem.target.target_variable,
+                    "kind": "problem_target",
+                    "label": problem.target.description or problem.target.surface_text,
+                    "value": None,
+                    "unit": problem.target.unit,
+                }
+            )
+
+    return refs
+
+
+def _build_compact_student_context(
+    problem: FormalizedProblem | None,
+) -> dict:
+    return {
+        "problem_text": problem.problem_text if problem is not None else None,
+        "problem_target": (
+            {
+                "target_variable": problem.target.target_variable,
+                "target_quantity_id": problem.target.target_quantity_id,
+                "surface_text": problem.target.surface_text,
+                "description": problem.target.description,
+                "unit": problem.target.unit,
+            }
+            if problem is not None and problem.target is not None
+            else None
+        ),
+        "problem_refs": _canonical_student_ref_payloads(problem),
     }
 
 
@@ -381,18 +579,7 @@ def _sanitize_student_step_payload(
     notes = list(raw_step.get("notes", []))
     extracted_value = raw_step.get("extracted_value")
     if isinstance(extracted_value, (int, float)):
-        extracted_float = float(extracted_value)
-        if not _is_grounded_numeric_value(
-            extracted_float,
-            surface_text=surface_text,
-            referenced_ids=referenced_ids,
-            problem_ref_values=problem_ref_values,
-            semantic_fact_values=semantic_fact_values,
-        ):
-            extracted_value = None
-            notes.append("local_step_repair:dropped_ungrounded_extracted_value")
-        else:
-            extracted_value = extracted_float
+        extracted_value = float(extracted_value)
     else:
         extracted_value = None if extracted_value is None else extracted_value
 
@@ -400,17 +587,17 @@ def _sanitize_student_step_payload(
     for input_value in raw_step.get("input_values", []):
         if not isinstance(input_value, (int, float)):
             continue
-        input_float = float(input_value)
+        numeric_value = float(input_value)
         if _is_grounded_numeric_value(
-            input_float,
+            numeric_value,
             surface_text=surface_text,
             referenced_ids=referenced_ids,
             problem_ref_values=problem_ref_values,
             semantic_fact_values=semantic_fact_values,
         ):
-            input_values.append(input_float)
+            input_values.append(numeric_value)
         else:
-            notes.append("local_step_repair:dropped_ungrounded_input_value")
+            notes.append(f"local_step_repair:dropped_ungrounded_input_value:{numeric_value:g}")
 
     confidence = raw_step.get("confidence", fallback_confidence)
     try:
@@ -470,6 +657,20 @@ def _repair_selected_target_ref(
         return selected_target_ref, []
 
     notes: list[str] = []
+    canonical_target_ref = problem.target.target_quantity_id or problem.target.target_variable
+    if canonical_target_ref and selected_target_ref == canonical_target_ref:
+        return selected_target_ref, []
+
+    if (
+        canonical_target_ref
+        and problem.target.target_quantity_id is not None
+        and selected_target_ref == problem.target.target_variable
+    ):
+        notes.append(
+            f"local_target_repair:normalized_target_alias:{selected_target_ref}->{problem.target.target_quantity_id}"
+        )
+        return problem.target.target_quantity_id, notes
+
     quantity_by_id = {quantity.quantity_id: quantity for quantity in problem.quantities}
     selected_quantity = quantity_by_id.get(selected_target_ref)
     if (
@@ -477,7 +678,7 @@ def _repair_selected_target_ref(
         and normalized_final_answer is not None
         and not _is_close_number(selected_quantity.value, normalized_final_answer)
     ):
-        repaired_ref = problem.target.target_variable
+        repaired_ref = canonical_target_ref
         if repaired_ref and repaired_ref != selected_target_ref:
             notes.append(
                 f"local_target_repair:retargeted_selected_ref:{selected_target_ref}->{repaired_ref}"
@@ -500,9 +701,6 @@ def _resolve_step_surface_text(
         if normalized_candidate and normalized_candidate in normalized_answer:
             return candidate.strip()
         raise ValueError(f"trace_steps[{step_index}] surface_text is not grounded in the student answer")
-
-    if step_index < len(heuristic_state.steps):
-        return heuristic_state.steps[step_index].raw_text
 
     raise ValueError(f"trace_steps[{step_index}] is missing grounded surface_text")
 
@@ -536,7 +734,7 @@ def _build_student_steps_from_sketch(
         referenced_ids = [
             ref_id
             for ref_id in raw_step.get("referenced_ids", [])
-            if isinstance(ref_id, str) and ref_id in allowed_problem_refs.union(semantic_fact_ids)
+            if isinstance(ref_id, str) and ref_id.strip()
         ]
         deduped_refs: list[str] = []
         seen_refs: set[str] = set()
@@ -569,60 +767,75 @@ def _build_student_steps_from_sketch(
     return compiled_steps
 
 
-def _build_student_work_from_sketch(
+def _merge_student_semantic_and_commitment_payloads(
+    semantic_payload: dict,
+    commitment_payload: dict,
+) -> dict:
+    merged = dict(semantic_payload)
+    merged.update(commitment_payload)
+    merged["notes"] = _coerce_list_of_strings(semantic_payload.get("notes")) + _coerce_list_of_strings(
+        commitment_payload.get("notes")
+    )
+    merged["assumptions"] = _coerce_list_of_strings(commitment_payload.get("assumptions"))
+    merged["trace_steps"] = [
+        step for step in commitment_payload.get("trace_steps", []) if isinstance(step, dict)
+    ]
+    merged["confidence"] = commitment_payload.get("confidence", semantic_payload.get("confidence"))
+    return merged
+
+
+def _build_student_work_from_artifacts(
     raw_answer: str,
     heuristic_state: StudentWorkState,
-    sketch: dict,
+    semantic_payload: dict,
+    commitment_payload: dict,
+    *,
     problem: FormalizedProblem | None = None,
 ) -> StudentWorkState:
+    merged = _merge_student_semantic_and_commitment_payloads(semantic_payload, commitment_payload)
     allowed_problem_refs = set(_allowed_student_refs(problem))
-    requested_mode = StudentWorkMode(sketch.get("mode", heuristic_state.mode))
-    all_semantic_facts = _build_student_semantic_facts_from_sketch(sketch)
-    semantic_fact_ids = {fact.fact_id for fact in all_semantic_facts}
+    requested_mode = StudentWorkMode(semantic_payload.get("mode", heuristic_state.mode))
+    local_notes: list[str] = []
+    semantic_facts = _build_student_semantic_facts_from_sketch(semantic_payload)
+    semantic_fact_ids = {fact.fact_id for fact in semantic_facts}
     semantic_fact_values = {
-        fact.fact_id: fact.value for fact in all_semantic_facts if fact.value is not None
+        fact.fact_id: fact.value for fact in semantic_facts if fact.value is not None
     }
     steps = _build_student_steps_from_sketch(
         raw_answer,
         heuristic_state,
-        sketch,
+        merged,
         allowed_problem_refs=allowed_problem_refs,
         semantic_fact_ids=semantic_fact_ids,
         problem=problem,
         semantic_fact_values=semantic_fact_values,
     )
-    semantic_facts, semantic_fact_notes = _prune_student_semantic_facts(all_semantic_facts, steps)
-    final_answer_block = sketch.get("final_answer")
-    normalized_final_answer = heuristic_state.normalized_final_answer
+    if steps:
+        semantic_facts, prune_notes = _prune_student_semantic_facts(semantic_facts, steps)
+        local_notes.extend(prune_notes)
+
+    final_answer_block = semantic_payload.get("final_answer")
+    normalized_final_answer = None
     if isinstance(final_answer_block, dict) and "value" in final_answer_block:
         normalized_final_answer = final_answer_block.get("value")
     if isinstance(normalized_final_answer, int):
         normalized_final_answer = float(normalized_final_answer)
+    if normalized_final_answer is None:
+        normalized_final_answer, derivation_notes = _derive_visible_final_answer_from_steps(steps)
+        local_notes.extend(derivation_notes)
 
-    selected_target_ref = _build_student_target_from_sketch(heuristic_state, sketch)
-    selected_target_ref, target_repair_notes = _repair_selected_target_ref(
-        selected_target_ref,
-        normalized_final_answer=normalized_final_answer,
-        problem=problem,
-    )
-    requested_mode, mode_repair_notes = _reconcile_student_mode(
-        requested_mode,
-        steps=steps,
-        normalized_final_answer=normalized_final_answer,
-    )
-
-    overall_confidence = sketch.get("confidence", heuristic_state.confidence)
+    overall_confidence = merged.get("confidence", heuristic_state.confidence)
     try:
         overall_confidence = float(overall_confidence)
     except (TypeError, ValueError):
         overall_confidence = heuristic_state.confidence
-    repair_notes: list[str] = []
     if overall_confidence <= 0.0:
         inferred_confidence = heuristic_state.confidence
         if inferred_confidence <= 0.0:
             inferred_confidence = 0.6 if normalized_final_answer is not None else 0.35
         overall_confidence = inferred_confidence
-        repair_notes.append("local_student_repair:recomputed_confidence")
+
+    selected_target_ref = _build_student_target_from_sketch(heuristic_state, semantic_payload)
 
     merged_payload = heuristic_state.model_dump(mode="json")
     merged_payload.update(
@@ -633,36 +846,29 @@ def _build_student_work_from_sketch(
             "semantic_facts": [fact.model_dump(mode="json") for fact in semantic_facts],
             "steps": [step.model_dump(mode="json") for step in steps],
             "selected_target_ref": selected_target_ref,
-            "assumptions": list(sketch.get("assumptions", heuristic_state.assumptions)),
+            "assumptions": list(merged.get("assumptions", heuristic_state.assumptions)),
             "confidence": overall_confidence,
-            "notes": list(heuristic_state.notes)
-            + list(sketch.get("notes", []))
-            + semantic_fact_notes
-            + target_repair_notes,
+            "notes": list(heuristic_state.notes) + list(merged.get("notes", [])) + local_notes + ["llm_student_parse_used"],
             "student_graph": None,
         }
     )
-    merged_payload["notes"] = list(merged_payload["notes"]) + repair_notes + mode_repair_notes + ["llm_student_parse_used"]
-
-    selected_target_ref = merged_payload.get("selected_target_ref")
-    if selected_target_ref is not None and selected_target_ref not in allowed_problem_refs:
-        raise ValueError(f"selected_target_ref '{selected_target_ref}' is not in allowed_refs")
 
     try:
         merged_state = StudentWorkState.model_validate(merged_payload)
     except ValidationError as exc:
         raise exc
 
-    return _attach_student_graph(merged_state, problem=problem, provenance_override=ProvenanceSource.LLM)
+    return _attach_student_graph(
+        merged_state,
+        problem=problem,
+        provenance_override=ProvenanceSource.LLM,
+    )
 
 
-def _allowed_student_refs(problem: FormalizedProblem | None) -> list[str]:
-    refs: set[str] = set()
-    if problem is not None:
-        refs.update(quantity.quantity_id for quantity in problem.quantities)
-        if problem.target is not None:
-            refs.add(problem.target.target_variable)
-    return sorted(refs)
+def _allowed_student_refs(
+    problem: FormalizedProblem | None,
+) -> list[str]:
+    return sorted(item["ref_id"] for item in _canonical_student_ref_payloads(problem))
 
 
 def _compare_with_heuristic_student_notes(

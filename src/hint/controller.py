@@ -12,6 +12,7 @@ from src.models import (
     HintMode,
     HintPlan,
     HintResult,
+    HintStrategy,
     TeacherMove,
 )
 
@@ -35,6 +36,7 @@ def build_hint_result(
     reference: CanonicalReference,
     diagnosis: DiagnosisResult,
     plan: HintPlan,
+    strategy: HintStrategy | None = None,
     hint_mode: HintMode = HintMode.NORMAL,
     llm_client: LLMClient | None = None,
 ) -> HintResult:
@@ -42,8 +44,8 @@ def build_hint_result(
     hint_text = generate_hint_text(
         problem,
         reference,
-        diagnosis,
         plan,
+        strategy=strategy,
         hint_mode=hint_mode,
         llm_client=llm_client,
     )

@@ -1,13 +1,13 @@
 """End-to-end tutoring pipeline runner."""
 from __future__ import annotations
 
-from src.diagnosis import diagnose
-from src.evidence import build_diagnosis_evidence
+from src.diagnosis import build_diagnosis
+from src.evidence import build_diagnosis_context, build_diagnosis_evidence
 from src.formalizer import formalize_problem, formalize_student_work
 from src.hint import build_hint_result
 from src.llm import LLMClient, build_default_llm_client
 from src.models import HintMode, TutoringResult
-from src.pedagogy import build_hint_plan
+from src.pedagogy import build_pedagogy_artifacts
 from src.runtime import build_canonical_reference
 
 
@@ -32,13 +32,25 @@ def run_tutoring_pipeline(
         llm_client=active_llm_client,
     )
     evidence = build_diagnosis_evidence(problem, reference, student_work)
-    diagnosis = diagnose(evidence, llm_client=active_llm_client)
-    hint_plan = build_hint_plan(problem, reference, diagnosis)
+    diagnosis_context = build_diagnosis_context(problem, reference, student_work, evidence)
+    diagnosis_state, diagnosis = build_diagnosis(
+        evidence,
+        context=diagnosis_context,
+        llm_client=active_llm_client,
+    )
+    pedagogy_state, hint_strategy, hint_plan = build_pedagogy_artifacts(
+        problem,
+        reference,
+        diagnosis,
+        diagnosis_state,
+        llm_client=active_llm_client,
+    )
     hint_result = build_hint_result(
         problem,
         reference,
         diagnosis,
         hint_plan,
+        strategy=hint_strategy,
         hint_mode=hint_mode,
         llm_client=active_llm_client,
     )
@@ -49,6 +61,9 @@ def run_tutoring_pipeline(
         student_work=student_work,
         evidence=evidence,
         diagnosis=diagnosis,
+        diagnosis_state=diagnosis_state,
+        pedagogy_state=pedagogy_state,
         hint_plan=hint_plan,
+        hint_strategy=hint_strategy,
         hint_result=hint_result,
     )

@@ -10,8 +10,8 @@ from typing import Any
 
 import requests
 
-from src.diagnosis import diagnose
-from src.evidence import build_diagnosis_evidence
+from src.diagnosis import build_diagnosis, diagnose
+from src.evidence import build_diagnosis_context, build_diagnosis_evidence
 from src.formalizer import formalize_problem, formalize_student_work
 from src.llm import LLMClient, LLMGenerationError, OpenRouterLLMClient, build_default_llm_client
 from src.runtime import build_canonical_reference
@@ -50,6 +50,13 @@ def _print_header(title: str) -> None:
 def _print_json(title: str, payload: Any) -> None:
     _print_header(title)
     print(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _note_value(notes: list[str], prefix: str) -> str | None:
+    for note in notes:
+        if note.startswith(prefix):
+            return note.split(":", 1)[1]
+    return None
 
 
 class RecordingLLMClient:
@@ -226,18 +233,26 @@ def main() -> list[dict[str, Any]]:
     reference = build_canonical_reference(problem)
     student = formalize_student_work(STUDENT_ANSWER, problem=problem, reference=reference)
     evidence = build_diagnosis_evidence(problem, reference, student)
-    deterministic = diagnose(evidence, llm_client=None)
+    context = build_diagnosis_context(problem, reference, student, evidence)
+    deterministic_state, deterministic = build_diagnosis(evidence, context=context, llm_client=None)
 
     base_client = build_default_llm_client() if USE_LLM else None
     recording_client = RecordingLLMClient(base_client) if base_client is not None else None
     print(f"LLM client available = {base_client is not None}")
 
-    final_diagnosis = diagnose(evidence, llm_client=recording_client) if recording_client is not None else deterministic
+    final_state, final_diagnosis = (
+        build_diagnosis(evidence, context=context, llm_client=recording_client)
+        if recording_client is not None
+        else (deterministic_state, deterministic)
+    )
 
     _print_json("Input", {"problem_text": PROBLEM_TEXT, "student_answer": STUDENT_ANSWER})
     _print_json("Student Work", student.model_dump(mode="json"))
     _print_json("Evidence", evidence.model_dump(mode="json"))
+    _print_json("Diagnosis Context", context.model_dump(mode="json"))
+    _print_json("Deterministic Diagnosis State", deterministic_state.model_dump(mode="json"))
     _print_json("Deterministic Diagnosis", deterministic.model_dump(mode="json"))
+    _print_json("Final Diagnosis State", final_state.model_dump(mode="json"))
     _print_json("Final Diagnosis", final_diagnosis.model_dump(mode="json"))
     _print_llm_attempts(
         recording_client.records if recording_client is not None else [],
@@ -248,8 +263,16 @@ def main() -> list[dict[str, Any]]:
     _print_header("Summary")
     print(f"Deterministic label: {deterministic.diagnosis_label.value}")
     print(f"Final label: {final_diagnosis.diagnosis_label.value}")
+    print(f"Answer acceptability: {final_state.answer_acceptability.value}")
+    print(f"Target alignment: {final_state.target_alignment.value}")
+    print(f"Process equivalence: {final_state.process_equivalence.value}")
+    print(f"Intervention required: {final_state.intervention_required}")
     print(f"Localization: {final_diagnosis.localization.value}")
     print(f"Target step: {final_diagnosis.target_step_id}")
+    print(f"Used llm-first diagnosis: {'llm_first_diagnosis_used' in final_diagnosis.notes}")
+    print(f"Fell back to deterministic: {'llm_diagnosis_failed_fallback' in final_diagnosis.notes}")
+    print(f"Failure stage: {_note_value(final_diagnosis.notes, 'llm_diagnosis_failure_stage:')}")
+    print(f"Failure reason: {_note_value(final_diagnosis.notes, 'llm_diagnosis_failure_reason:')}")
     return recording_client.records if recording_client is not None else []
 
 

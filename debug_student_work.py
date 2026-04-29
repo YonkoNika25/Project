@@ -11,8 +11,7 @@ from typing import Any
 import requests
 
 from src.formalizer import formalize_problem, formalize_student_work
-from src.llm import LLMClient, LLMGenerationError, OpenRouterLLMClient, build_default_llm_client
-from src.runtime import build_canonical_reference
+from src.llm import LLMClient, OpenRouterLLMClient, build_default_llm_client
 
 
 # Edit these values, then run:
@@ -59,8 +58,9 @@ def _extract_feedback_block(user_prompt: str) -> str | None:
         return None
     tail = user_prompt.split(marker, 1)[1]
     end_markers = [
-        "\n\nCompact heuristic draft for reference only:\n",
-        "\n\nHeuristic fallback draft for reference only:",
+        "\n\nCompact problem context:\n",
+        "\n\nCompact heuristic draft:\n",
+        "\n\nReturn only the JSON object.",
     ]
     for end_marker in end_markers:
         if end_marker in tail:
@@ -271,6 +271,26 @@ def _print_llm_attempts(records: list[dict[str, Any]], llm_requested: bool, llm_
             print(f"Error: {record['error']}")
 
 
+def _summarize_attempts(records: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for record in records:
+        task_name = record.get("task_name", "unknown")
+        task_summary = summary.setdefault(
+            task_name,
+            {
+                "attempt_count": 0,
+                "success_count": 0,
+                "error_count": 0,
+            },
+        )
+        task_summary["attempt_count"] += 1
+        if record.get("status") == "success":
+            task_summary["success_count"] += 1
+        else:
+            task_summary["error_count"] += 1
+    return summary
+
+
 def main() -> list[dict[str, Any]]:
     print("Student Work Debugger")
     print(f"USE_LLM = {USE_LLM}")
@@ -281,19 +301,12 @@ def main() -> list[dict[str, Any]]:
 
     problem = formalize_problem(
         PROBLEM_TEXT,
-        llm_client=recording_client if recording_client is not None else None,
+        llm_client=base_client if base_client is not None else None,
     )
-    reference = None
-    reference_error: str | None = None
-    try:
-        reference = build_canonical_reference(problem)
-    except Exception as exc:
-        reference_error = str(exc)
 
     heuristic_student = formalize_student_work(
         STUDENT_ANSWER,
         problem=problem,
-        reference=reference,
         llm_client=None,
     )
 
@@ -301,7 +314,6 @@ def main() -> list[dict[str, Any]]:
         formalize_student_work(
             STUDENT_ANSWER,
             problem=problem,
-            reference=reference,
             llm_client=recording_client,
         )
         if recording_client is not None
@@ -316,9 +328,6 @@ def main() -> list[dict[str, Any]]:
         },
     )
     _print_json("Problem", problem.model_dump(mode="json"))
-    _print_json("Reference", reference.model_dump(mode="json") if reference is not None else None)
-    if reference_error is not None:
-        _print_json("Reference Build Error", {"error": reference_error})
     _print_json("Heuristic Student Work", heuristic_student.model_dump(mode="json"))
     _print_json("Final Student Work", final_student.model_dump(mode="json"))
     _print_json(
@@ -337,13 +346,15 @@ def main() -> list[dict[str, Any]]:
     print(f"Heuristic final answer: {heuristic_student.normalized_final_answer}")
     print(f"Final final answer: {final_student.normalized_final_answer}")
     print(f"Selected target ref: {final_student.selected_target_ref}")
-    print(f"Reference available: {reference is not None}")
-    if reference_error is not None:
-        print(f"Reference build error: {reference_error}")
     print(f"Student graph present: {final_student.student_graph is not None}")
     print(
         f"Student graph target node: "
         f"{final_student.student_graph.target_node_id if final_student.student_graph is not None else None}"
+    )
+    print(f"Student-side fallback notes: {[note for note in final_student.notes if 'llm_student_' in note or 'student_graph_issue:' in note]}")
+    _print_json(
+        "LLM Attempt Summary",
+        _summarize_attempts(recording_client.records if recording_client is not None else []),
     )
     return recording_client.records if recording_client is not None else []
 

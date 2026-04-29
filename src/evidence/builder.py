@@ -11,7 +11,12 @@ from src.evidence.alignment import (
 )
 from src.models import (
     CanonicalReference,
+    DiagnosisContext,
+    DiagnosisContextQuantity,
     DiagnosisEvidence,
+    DiagnosisEvidenceSnapshot,
+    DiagnosisReferenceStepContext,
+    DiagnosisStudentStepContext,
     EvidenceItem,
     FormalizedProblem,
     StudentWorkMode,
@@ -20,8 +25,28 @@ from src.models import (
 )
 
 
+def _trim_text(text: str | None, limit: int = 160) -> str | None:
+    if text is None:
+        return None
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
+
+
 def _reference_output_to_step_id(reference: CanonicalReference) -> dict[str, str]:
     return {step.output_ref: step.step_id for step in reference.chosen_plan.steps}
+
+
+def _reference_step_order(reference: CanonicalReference) -> dict[str, int]:
+    return {step.step_id: index for index, step in enumerate(reference.chosen_plan.steps)}
+
+
+def _target_equivalent_refs(problem: FormalizedProblem, reference: CanonicalReference) -> set[str]:
+    refs = {reference.chosen_plan.target_ref}
+    if problem.target is not None and problem.target.target_quantity_id is not None:
+        refs.add(problem.target.target_quantity_id)
+    return refs
 
 
 def _student_target_linked_output_step_id(student: StudentWorkState) -> str | None:
@@ -73,7 +98,7 @@ def _build_unparseable_evidence() -> DiagnosisEvidence:
         ],
         alignment_map=[],
         first_divergence_step_id=None,
-        likely_error_mechanisms=["unparseable_answer"],
+        likely_error_mechanisms=[],
         confidence=0.94,
         notes=["student_work_unparseable"],
     )
@@ -96,6 +121,44 @@ def _alignment_payload(alignments) -> list[dict]:
     ]
 
 
+def _mechanical_first_divergence_step_id(
+    reference: CanonicalReference,
+    evidence_items: list[EvidenceItem],
+    *,
+    final_answer_correct: bool,
+    student_has_steps: bool,
+) -> str | None:
+    if final_answer_correct:
+        return None
+
+    step_order = _reference_step_order(reference)
+    candidate_types = {
+        "selected_intermediate_reference",
+        "dependency_mismatch",
+        "edge_level_divergence",
+        "operation_mismatch",
+        "step_value_mismatch",
+        "target_correct_but_value_wrong",
+    }
+    candidate_step_ids: list[str] = []
+
+    for item in evidence_items:
+        if item.evidence_type in candidate_types and item.reference_step_id is not None:
+            candidate_step_ids.append(item.reference_step_id)
+        if item.evidence_type == "missing_reference_steps" and student_has_steps:
+            candidate_step_ids.extend(
+                step_id
+                for step_id in item.metadata.get("missing_reference_step_ids", [])
+                if isinstance(step_id, str)
+            )
+
+    ordered_candidates = sorted(
+        {step_id for step_id in candidate_step_ids if step_id in step_order},
+        key=lambda step_id: step_order[step_id],
+    )
+    return ordered_candidates[0] if ordered_candidates else None
+
+
 def build_diagnosis_evidence(
     problem: FormalizedProblem,
     reference: CanonicalReference,
@@ -106,10 +169,10 @@ def build_diagnosis_evidence(
         return _build_unparseable_evidence()
 
     evidence_items: list[EvidenceItem] = []
-    mechanisms: list[str] = []
-    notes: list[str] = [f"student_mode={student.mode.value}"]
-    first_divergence_step_id: str | None = None
+    notes: list[str] = [f"student_mode={student.mode.value}", "evidence_builder_mode=factual_projection"]
     target_ref = reference.chosen_plan.target_ref
+    target_equivalent_refs = _target_equivalent_refs(problem, reference)
+    final_answer_correct = values_match(student.normalized_final_answer, reference.final_answer)
     output_ref_to_step_id = _reference_output_to_step_id(reference)
     inferred_target_ref = infer_student_target_ref(problem, reference, student)
     alignments = global_align_student_steps(student, reference)
@@ -136,7 +199,7 @@ def build_diagnosis_evidence(
             )
         )
 
-    if values_match(student.normalized_final_answer, reference.final_answer):
+    if final_answer_correct:
         evidence_items.append(
             EvidenceItem(
                 evidence_type="correct_final_answer",
@@ -159,10 +222,9 @@ def build_diagnosis_evidence(
                 },
             )
         )
-        mechanisms.append("final_answer_mismatch")
 
     if inferred_target_ref is not None:
-        if inferred_target_ref == target_ref:
+        if inferred_target_ref in target_equivalent_refs:
             evidence_items.append(
                 EvidenceItem(
                     evidence_type="target_ref_match",
@@ -183,10 +245,6 @@ def build_diagnosis_evidence(
                     metadata={"selected_target_ref": inferred_target_ref},
                 )
             )
-            if "selected_intermediate_target" not in mechanisms:
-                mechanisms.append("selected_intermediate_target")
-            if first_divergence_step_id is None:
-                first_divergence_step_id = matched_step_id
         else:
             quantity = next((candidate for candidate in problem.quantities if candidate.quantity_id == inferred_target_ref), None)
             if quantity is not None:
@@ -202,15 +260,13 @@ def build_diagnosis_evidence(
                         },
                     )
                 )
-                if "selected_visible_quantity_as_answer" not in mechanisms:
-                    mechanisms.append("selected_visible_quantity_as_answer")
     else:
         linked_output_step_id = _student_target_linked_output_step_id(student)
         if linked_output_step_id is not None:
             linked_alignment = alignment_by_student_step_id.get(linked_output_step_id)
             if linked_alignment is not None and linked_alignment.reference_step_id is not None:
                 matched_reference_output = linked_alignment.matched_output_ref
-                if matched_reference_output is not None and matched_reference_output != target_ref:
+                if matched_reference_output is not None and matched_reference_output not in target_equivalent_refs:
                     matched_step_id = linked_alignment.reference_step_id
                     evidence_items.append(
                         EvidenceItem(
@@ -222,11 +278,6 @@ def build_diagnosis_evidence(
                             metadata={"matched_output_ref": matched_reference_output},
                         )
                     )
-                    if "selected_intermediate_target" not in mechanisms:
-                        mechanisms.append("selected_intermediate_target")
-                    if first_divergence_step_id is None:
-                        first_divergence_step_id = matched_step_id
-
         if linked_output_step_id is None:
             matched_quantity = _unique_visible_problem_quantity(problem, student.normalized_final_answer)
             if matched_quantity is not None:
@@ -242,8 +293,6 @@ def build_diagnosis_evidence(
                         },
                     )
                 )
-                if "selected_visible_quantity_as_answer" not in mechanisms:
-                    mechanisms.append("selected_visible_quantity_as_answer")
 
     if reordered_consistent:
         evidence_items.append(
@@ -304,11 +353,27 @@ def build_diagnosis_evidence(
                     metadata={"reasons": item["reasons"], "score": item["score"]},
                 )
             )
-            if "unsupported_step" not in mechanisms:
-                mechanisms.append("unsupported_step")
             continue
 
         if item["relationship"] == "aligned":
+            student_step = student_steps_by_id.get(item["student_step_id"])
+            if (
+                student_step is not None
+                and student_step.operation == TraceOperation.DERIVE
+                and values_match(student_step.extracted_value, student.normalized_final_answer)
+                and "answer" in student_step.raw_text.lower()
+            ):
+                evidence_items.append(
+                    EvidenceItem(
+                        evidence_type="restated_final_answer",
+                        description="The student restates the final answer after already producing a structured target value.",
+                        confidence=0.74,
+                        reference_step_id=item["reference_step_id"],
+                        student_step_id=item["student_step_id"],
+                        metadata={"matched_output_ref": item["matched_output_ref"], "reasons": item["reasons"]},
+                    )
+                )
+                continue
             evidence_items.append(
                 EvidenceItem(
                     evidence_type="step_value_match",
@@ -350,10 +415,6 @@ def build_diagnosis_evidence(
                     },
                 )
             )
-            if "dependency_mismatch" not in mechanisms:
-                mechanisms.append("dependency_mismatch")
-            if first_divergence_step_id is None:
-                first_divergence_step_id = item["reference_step_id"]
             continue
 
         if item["relationship"] == "value_match_operation_mismatch":
@@ -385,10 +446,6 @@ def build_diagnosis_evidence(
                     metadata={"matched_output_ref": item["matched_output_ref"], "reasons": item["reasons"]},
                 )
             )
-            if "operation_mismatch" not in mechanisms:
-                mechanisms.append("operation_mismatch")
-            if first_divergence_step_id is None:
-                first_divergence_step_id = item["reference_step_id"]
             continue
 
         if item["relationship"] == "value_mismatch":
@@ -402,12 +459,8 @@ def build_diagnosis_evidence(
                     metadata={"matched_output_ref": item["matched_output_ref"], "reasons": item["reasons"]},
                 )
             )
-            if "arithmetic_mismatch" not in mechanisms:
-                mechanisms.append("arithmetic_mismatch")
-            if first_divergence_step_id is None:
-                first_divergence_step_id = item["reference_step_id"]
 
-    if values_match(student.normalized_final_answer, reference.final_answer):
+    if final_answer_correct:
         if reference_step_ids - matched_reference_step_ids and not reordered_consistent:
             notes.append("correct_final_answer_with_partial_process_coverage")
     else:
@@ -421,19 +474,10 @@ def build_diagnosis_evidence(
                     metadata={"missing_reference_step_ids": missing_reference_step_ids},
                 )
             )
-            if "missing_step" not in mechanisms:
-                mechanisms.append("missing_step")
-            if first_divergence_step_id is None:
-                first_divergence_step_id = missing_reference_step_ids[0]
-
-    if edit_summary.total_cost > 0 and not reordered_consistent and "graph_edit_distance_nonzero" not in mechanisms:
-        mechanisms.append("graph_edit_distance_nonzero")
 
     if (
-        not values_match(student.normalized_final_answer, reference.final_answer)
-        and inferred_target_ref == target_ref
-        and "arithmetic_mismatch" not in mechanisms
-        and "selected_intermediate_target" not in mechanisms
+        not final_answer_correct
+        and any(item.evidence_type == "target_ref_match" for item in evidence_items)
     ):
         evidence_items.append(
             EvidenceItem(
@@ -444,9 +488,6 @@ def build_diagnosis_evidence(
                 metadata={"student_final_answer": student.normalized_final_answer},
             )
         )
-        mechanisms.append("arithmetic_mismatch")
-        if first_divergence_step_id is None:
-            first_divergence_step_id = output_ref_to_step_id.get(target_ref)
 
     if not evidence_items:
         evidence_items.append(
@@ -458,6 +499,15 @@ def build_diagnosis_evidence(
         )
         notes.append("insufficient_alignment_signal")
 
+    first_divergence_step_id = _mechanical_first_divergence_step_id(
+        reference,
+        evidence_items,
+        final_answer_correct=final_answer_correct,
+        student_has_steps=bool(student.steps),
+    )
+    if first_divergence_step_id is not None:
+        notes.append(f"mechanical_first_divergence_candidate={first_divergence_step_id}")
+
     confidence = min(
         0.25 + sum(item.confidence for item in evidence_items) / max(len(evidence_items), 1) * 0.75,
         0.97,
@@ -467,7 +517,109 @@ def build_diagnosis_evidence(
         evidence_items=evidence_items,
         alignment_map=alignment_map,
         first_divergence_step_id=first_divergence_step_id,
-        likely_error_mechanisms=mechanisms,
+        likely_error_mechanisms=[],
         confidence=confidence,
         notes=notes,
+    )
+
+
+def build_diagnosis_context(
+    problem: FormalizedProblem,
+    reference: CanonicalReference,
+    student: StudentWorkState,
+    evidence: DiagnosisEvidence,
+) -> DiagnosisContext:
+    """Build a compact typed context artifact for the diagnosis module."""
+    target_quantity_id = problem.target.target_quantity_id if problem.target is not None else None
+    problem_quantities = [
+        DiagnosisContextQuantity(
+            quantity_id=quantity.quantity_id,
+            surface_text=_trim_text(quantity.surface_text, 80),
+            value=quantity.value,
+            semantic_role=quantity.semantic_role.value,
+        )
+        for quantity in problem.quantities
+        if quantity.is_target_candidate
+        or quantity.quantity_id == target_quantity_id
+        or abs(quantity.value) > 1e-9
+    ]
+
+    step_results = {result.step_id: result for result in reference.execution_trace.step_results}
+    reference_steps = [
+        DiagnosisReferenceStepContext(
+            step_id=step.step_id,
+            operation=step.operation.value,
+            input_refs=list(step.input_refs),
+            output_ref=step.output_ref,
+            output_value=step_results.get(step.step_id).output_value if step.step_id in step_results else None,
+        )
+        for step in reference.chosen_plan.steps
+    ]
+
+    student_steps = [
+        DiagnosisStudentStepContext(
+            step_id=step.step_id,
+            raw_text=_trim_text(step.raw_text, 120),
+            operation=step.operation.value if step.operation is not None else None,
+            extracted_value=step.extracted_value,
+            referenced_ids=list(step.referenced_ids),
+        )
+        for step in student.steps
+    ]
+
+    evidence_snapshot = DiagnosisEvidenceSnapshot(
+        evidence_types=[item.evidence_type for item in evidence.evidence_items],
+        first_divergence_step_id=evidence.first_divergence_step_id,
+        confidence=evidence.confidence,
+        items=[
+            {
+                "type": item.evidence_type,
+                "reference_step_id": item.reference_step_id,
+                "student_step_id": item.student_step_id,
+                "quantity_ids": item.quantity_ids[:3],
+                "metadata": {
+                    key: value[:4] if key == "reasons" and isinstance(value, list) else value
+                    for key, value in item.metadata.items()
+                    if key in {"matched_output_ref", "selected_target_ref", "student_final_answer", "reasons", "total_cost"}
+                },
+            }
+            for item in evidence.evidence_items[:10]
+        ],
+        alignment_focus=[
+            {
+                "student_step_id": entry.get("student_step_id"),
+                "reference_step_id": entry.get("reference_step_id"),
+                "relationship": str(entry.get("relationship", "unknown")),
+                "matched_output_ref": entry.get("matched_output_ref"),
+                "reasons": list(entry.get("reasons", []))[:4],
+                "missing_dependencies": list(entry.get("missing_dependencies", []))[:3],
+                "extra_dependencies": list(entry.get("extra_dependencies", []))[:3],
+            }
+            for entry in evidence.alignment_map
+            if not (
+                str(entry.get("relationship", "unknown")) == "aligned"
+                and not entry.get("missing_dependencies")
+                and not entry.get("extra_dependencies")
+            )
+        ][:8],
+    )
+
+    return DiagnosisContext(
+        problem_text=_trim_text(problem.problem_text, 320),
+        target_variable=problem.target.target_variable if problem.target is not None else None,
+        target_quantity_id=problem.target.target_quantity_id if problem.target is not None else None,
+        target_surface_text=_trim_text(problem.target.surface_text, 140) if problem.target is not None else None,
+        target_description=_trim_text(problem.target.description, 140) if problem.target is not None else None,
+        problem_quantities=problem_quantities,
+        reference_final_answer=reference.final_answer,
+        reference_target_ref=reference.chosen_plan.target_ref,
+        reference_steps=reference_steps,
+        student_raw_answer=_trim_text(student.raw_answer, 320),
+        student_normalized_final_answer=student.normalized_final_answer,
+        student_mode=student.mode.value,
+        student_selected_target_ref=student.selected_target_ref,
+        student_steps=student_steps,
+        student_semantic_fact_labels=[fact.label for fact in student.semantic_facts[:6]],
+        evidence_snapshot=evidence_snapshot,
+        notes=["diagnosis_context_built_from_artifacts"],
     )

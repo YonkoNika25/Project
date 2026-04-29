@@ -249,7 +249,7 @@ def repair_hint_text(
                 hint_text=llm_candidate,
                 notes=["hint_repair_attempted", "hint_repair:llm_rewrite"],
             )
-        except (LLMGenerationError, ValueError, TypeError):
+        except (LLMGenerationError, ValueError, TypeError, KeyError):
             pass
 
     return HintRepairResult(

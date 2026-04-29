@@ -1,7 +1,8 @@
+import re
 from copy import deepcopy
 
 from src.diagnosis import diagnose
-from src.evidence import build_diagnosis_evidence
+from src.evidence import build_diagnosis_context, build_diagnosis_evidence
 from src.formalizer import formalize_problem, formalize_student_work
 from src.hint import build_hint_result
 from src.models import DiagnosisLabel, QuantitySemanticRole, StudentWorkMode, TraceOperation
@@ -14,6 +15,349 @@ class FakeLLMClient:
     def __init__(self, responses):
         self.responses = responses
         self.calls = []
+        self._pending_problem_commitment_payload = None
+        self._pending_student_commitment_payload = None
+
+    @staticmethod
+    def _extract_block(user_prompt: str, marker: str, terminator: str) -> str:
+        if marker not in user_prompt:
+            return ""
+        tail = user_prompt.split(marker, 1)[1]
+        if terminator in tail:
+            tail = tail.split(terminator, 1)[0]
+        return tail.strip()
+
+    @staticmethod
+    def _parse_numeric_mentions(text: str) -> list[float]:
+        values: list[float] = []
+        for match in re.findall(r"-?\d[\d,]*\.?\d*", text):
+            normalized = match.replace(",", "")
+            try:
+                values.append(float(normalized))
+            except ValueError:
+                continue
+        return values
+
+    def _consume(self, key: str):
+        if key not in self.responses:
+            raise KeyError(key)
+        response = self.responses[key]
+        if isinstance(response, list):
+            if not response:
+                raise AssertionError(f"No queued response left for task '{key}'")
+            response = response.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return deepcopy(response)
+
+    def _problem_payload_for_task(self, task_name: str, user_prompt: str):
+        if task_name == "problem_formalizer_semantic_state":
+            payload = self._consume("problem_formalizer")
+            self._pending_problem_commitment_payload = deepcopy(payload)
+        elif task_name == "problem_formalizer_executable_commitment":
+            if self._pending_problem_commitment_payload is not None:
+                payload = deepcopy(self._pending_problem_commitment_payload)
+                self._pending_problem_commitment_payload = None
+            else:
+                payload = self._consume("problem_formalizer")
+        else:
+            raise KeyError(task_name)
+
+        problem_text = self._extract_block(user_prompt, "Problem text:\n", "\n\nReturn one JSON object")
+        numeric_mentions = self._parse_numeric_mentions(problem_text)
+        default_observed_value = max(numeric_mentions) if numeric_mentions else 0.0
+
+        target = deepcopy(payload.get("target", {}))
+        relation = deepcopy(payload.get("relation", {}))
+        plan_steps = [deepcopy(step) for step in payload.get("plan_steps", []) if isinstance(step, dict)]
+
+        if task_name == "problem_formalizer_semantic_state":
+            quantities = []
+            seen_quantity_ids: set[str] = set()
+            for raw_quantity in payload.get("quantity_annotations", []):
+                quantity_id = raw_quantity.get("quantity_id")
+                if not quantity_id or quantity_id in seen_quantity_ids:
+                    continue
+                seen_quantity_ids.add(quantity_id)
+                quantities.append(
+                    {
+                        "quantity_id": quantity_id,
+                        "surface_text": raw_quantity.get("surface_text") or str(quantity_id),
+                        "value": float(raw_quantity.get("value", default_observed_value)),
+                        "unit": raw_quantity.get("unit"),
+                        "entity_id": raw_quantity.get("entity_id"),
+                        "semantic_role": raw_quantity.get("semantic_role", "unknown"),
+                        "is_target_candidate": bool(raw_quantity.get("is_target_candidate", False)),
+                        "origin": raw_quantity.get("origin", "observed"),
+                        "evidence_ref": quantity_id,
+                        "grounding": raw_quantity.get("surface_text") or str(quantity_id),
+                        "notes": list(raw_quantity.get("notes", [])),
+                    }
+                )
+            for raw_fact in payload.get("semantic_facts", []):
+                quantity_id = raw_fact.get("fact_id")
+                if not quantity_id or quantity_id in seen_quantity_ids:
+                    continue
+                seen_quantity_ids.add(quantity_id)
+                quantities.append(
+                    {
+                        "quantity_id": quantity_id,
+                        "surface_text": raw_fact.get("surface_text") or raw_fact.get("label") or str(quantity_id),
+                        "value": float(raw_fact.get("value", 0.0)),
+                        "unit": raw_fact.get("unit"),
+                        "entity_id": raw_fact.get("entity_id"),
+                        "semantic_role": raw_fact.get("semantic_role", "intermediate"),
+                        "is_target_candidate": bool(raw_fact.get("is_target_candidate", False)),
+                        "origin": "latent" if str(quantity_id).startswith("latent_") else "derived",
+                        "evidence_ref": None,
+                        "grounding": raw_fact.get("grounding") or raw_fact.get("label") or str(quantity_id),
+                        "notes": list(raw_fact.get("notes", [])),
+                    }
+                )
+            for step in plan_steps:
+                output_ref = step.get("output_ref")
+                if (
+                    isinstance(output_ref, str)
+                    and output_ref
+                    and output_ref not in seen_quantity_ids
+                    and output_ref != target.get("target_variable")
+                ):
+                    seen_quantity_ids.add(output_ref)
+                    quantities.append(
+                        {
+                            "quantity_id": output_ref,
+                            "surface_text": output_ref,
+                            "value": 0.0,
+                            "unit": step.get("output_unit"),
+                            "entity_id": None,
+                            "semantic_role": "intermediate",
+                            "is_target_candidate": output_ref == target.get("target_quantity_id"),
+                            "origin": "derived",
+                            "evidence_ref": None,
+                            "grounding": step.get("label") or output_ref,
+                            "notes": ["legacy_test_payload_derived_quantity"],
+                        }
+                    )
+
+            return {
+                "entities": [],
+                "quantities": quantities,
+                "semantic_structure": [],
+                "target": {
+                    "surface_text": target.get("surface_text", target.get("description", "target")),
+                    "normalized_question": target.get("normalized_question"),
+                    "target_variable": target.get("target_variable"),
+                    "target_quantity_id": target.get("target_quantity_id"),
+                    "entity_id": target.get("entity_id"),
+                    "unit": target.get("unit"),
+                    "description": target.get("description"),
+                    "confidence": float(target.get("confidence", payload.get("confidence", 0.9))),
+                },
+                "relation": {
+                    "relation_type": relation.get("relation_type", "unknown"),
+                    "operation_hint": relation.get("operation_hint", "unknown"),
+                    "source_quantity_ids": list(relation.get("source_quantity_ids", [])),
+                    "target_variable": relation.get("target_variable") or target.get("target_variable"),
+                    "rationale": relation.get("rationale"),
+                    "confidence": float(relation.get("confidence", payload.get("confidence", 0.8))),
+                },
+                "confidence": float(payload.get("confidence", 0.9)),
+                "notes": list(payload.get("notes", [])),
+            }
+
+        normalized_steps = []
+        for step in plan_steps:
+            normalized_step = deepcopy(step)
+            expression = str(normalized_step.get("expression", "")).strip()
+            if "=" in expression:
+                normalized_step["expression"] = expression.split("=", 1)[1].strip()
+            normalized_steps.append(normalized_step)
+        return {
+            "plan_steps": normalized_steps,
+            "graph_target_node_id": payload.get("graph_target_node_id"),
+            "graph_confidence": float(payload.get("graph_confidence", payload.get("confidence", 0.9))),
+            "graph_notes": list(payload.get("graph_notes", [])),
+            "assumptions": list(payload.get("assumptions", [])),
+            "confidence": float(payload.get("confidence", 0.9)),
+            "notes": list(payload.get("notes", [])),
+        }
+
+    def _student_payload_for_task(self, task_name: str):
+        if task_name == "student_work_semantic_state":
+            payload = self._consume("student_work_formalizer")
+            self._pending_student_commitment_payload = deepcopy(payload)
+        elif task_name == "student_work_trace_commitment":
+            if self._pending_student_commitment_payload is not None:
+                payload = deepcopy(self._pending_student_commitment_payload)
+                self._pending_student_commitment_payload = None
+            else:
+                payload = self._consume("student_work_formalizer")
+        else:
+            raise KeyError(task_name)
+
+        if task_name == "student_work_semantic_state":
+            return {
+                "final_answer": deepcopy(payload.get("final_answer", {})),
+                "mode": payload.get("mode", "final_answer_only"),
+                "target": deepcopy(payload.get("target", {})),
+                "semantic_facts": deepcopy(payload.get("semantic_facts", [])),
+                "confidence": float(payload.get("confidence", 0.9)),
+                "notes": list(payload.get("notes", [])),
+            }
+        return {
+            "trace_steps": deepcopy(payload.get("trace_steps", [])),
+            "assumptions": list(payload.get("assumptions", [])),
+            "confidence": float(payload.get("confidence", 0.9)),
+            "notes": list(payload.get("notes", [])),
+        }
+
+    def _diagnosis_payload_for_task(self, task_name: str):
+        if task_name == "diagnosis_state" and "diagnosis_state" in self.responses:
+            return self._consume("diagnosis_state")
+        if task_name == "diagnosis_state" and "diagnosis_interpretation" in self.responses:
+            payload = self._consume("diagnosis_interpretation")
+            label = payload.get("diagnosis_label")
+            if label == "correct_answer":
+                return {
+                    "answer_acceptability": "acceptable",
+                    "target_alignment": "aligned",
+                    "process_equivalence": "canonical",
+                    "intervention_required": False,
+                    "verified_error_mechanisms": [],
+                    "uncertain_concerns": [],
+                    "candidate_localization": payload.get("localization", "none"),
+                    "candidate_target_step_id": payload.get("candidate_target_step_id"),
+                    "candidate_focus_step_ids": [],
+                    "supporting_evidence_types": deepcopy(payload.get("supporting_evidence_types", [])),
+                    "grounded_evidence": deepcopy(payload.get("grounded_evidence")),
+                    "key_findings": deepcopy(payload.get("reasoning_points", [])),
+                    "summary": payload.get("summary", ""),
+                    "confidence": float(payload.get("confidence", 0.9)),
+                    "notes": list(payload.get("notes", [])),
+                }
+            if label == "target_misunderstanding":
+                return {
+                    "answer_acceptability": "unacceptable",
+                    "target_alignment": "misaligned",
+                    "process_equivalence": "partial_or_noisy_but_acceptable",
+                    "intervention_required": True,
+                    "verified_error_mechanisms": ["wrong_target_selected"],
+                    "uncertain_concerns": [],
+                    "candidate_localization": payload.get("localization", "target_selection"),
+                    "candidate_target_step_id": payload.get("candidate_target_step_id"),
+                    "candidate_focus_step_ids": [],
+                    "supporting_evidence_types": deepcopy(payload.get("supporting_evidence_types", [])),
+                    "grounded_evidence": deepcopy(payload.get("grounded_evidence")),
+                    "key_findings": deepcopy(payload.get("reasoning_points", [])),
+                    "summary": payload.get("summary", ""),
+                    "confidence": float(payload.get("confidence", 0.9)),
+                    "notes": list(payload.get("notes", [])),
+                }
+            if label == "quantity_relation_error":
+                return {
+                    "answer_acceptability": "unacceptable",
+                    "target_alignment": "aligned",
+                    "process_equivalence": "inconsistent",
+                    "intervention_required": True,
+                    "verified_error_mechanisms": ["quantity_relationship_invalid"],
+                    "uncertain_concerns": [],
+                    "candidate_localization": payload.get("localization", "combining_quantities"),
+                    "candidate_target_step_id": payload.get("candidate_target_step_id"),
+                    "candidate_focus_step_ids": [],
+                    "supporting_evidence_types": deepcopy(payload.get("supporting_evidence_types", [])),
+                    "grounded_evidence": deepcopy(payload.get("grounded_evidence")),
+                    "key_findings": deepcopy(payload.get("reasoning_points", [])),
+                    "summary": payload.get("summary", ""),
+                    "confidence": float(payload.get("confidence", 0.9)),
+                    "notes": list(payload.get("notes", [])),
+                }
+            if label == "unparseable_answer":
+                return {
+                    "answer_acceptability": "unparseable",
+                    "target_alignment": "unknown",
+                    "process_equivalence": "unknown",
+                    "intervention_required": True,
+                    "verified_error_mechanisms": ["answer_not_numeric"],
+                    "uncertain_concerns": [],
+                    "candidate_localization": payload.get("localization", "unknown"),
+                    "candidate_target_step_id": None,
+                    "candidate_focus_step_ids": [],
+                    "supporting_evidence_types": deepcopy(payload.get("supporting_evidence_types", [])),
+                    "grounded_evidence": deepcopy(payload.get("grounded_evidence")),
+                    "key_findings": deepcopy(payload.get("reasoning_points", [])),
+                    "summary": payload.get("summary", ""),
+                    "confidence": float(payload.get("confidence", 0.9)),
+                    "notes": list(payload.get("notes", [])),
+                }
+            return {
+                "answer_acceptability": "unacceptable",
+                "target_alignment": "aligned",
+                "process_equivalence": "inconsistent",
+                "intervention_required": True,
+                "verified_error_mechanisms": ["arithmetic_execution_invalid"],
+                "uncertain_concerns": [],
+                "candidate_localization": payload.get("localization", "final_computation"),
+                "candidate_target_step_id": payload.get("candidate_target_step_id"),
+                "candidate_focus_step_ids": [],
+                "supporting_evidence_types": deepcopy(payload.get("supporting_evidence_types", [])),
+                "grounded_evidence": deepcopy(payload.get("grounded_evidence")),
+                "key_findings": deepcopy(payload.get("reasoning_points", [])),
+                "summary": payload.get("summary", ""),
+                "confidence": float(payload.get("confidence", 0.9)),
+                "notes": list(payload.get("notes", [])),
+            }
+        raise KeyError(task_name)
+
+    def _pedagogy_payload_for_task(self, task_name: str):
+        if task_name == "pedagogy_state" and "pedagogy_state" in self.responses:
+            return self._consume("pedagogy_state")
+        if task_name == "pedagogy_state" and "hint_strategy" in self.responses:
+            payload = self._consume("hint_strategy")
+            teacher_move = payload.get("teacher_move")
+            target_step_id = payload.get("target_step_id")
+            disclosure_budget = int(payload.get("disclosure_budget", 1))
+            if teacher_move == "restate_result":
+                return {
+                    "intervention_posture": "acknowledge_correct",
+                    "primary_objective": "none",
+                    "disclosure_policy": "none",
+                    "step_grounding_requirement": "none",
+                    "candidate_target_step_id": None,
+                    "candidate_focus_step_ids": [],
+                    "focus_semantics": [],
+                    "uncertain_pedagogical_concerns": [],
+                    "pedagogical_goal": payload.get("pedagogical_goal", ""),
+                    "student_action": payload.get("student_action"),
+                    "rationale": payload.get("rationale", ""),
+                    "confidence": float(payload.get("confidence", 0.9)),
+                    "notes": list(payload.get("notes", [])),
+                }
+            if teacher_move == "refocus_target":
+                objective = "refocus_target"
+            elif teacher_move == "check_relationship":
+                objective = "repair_quantity_relationship"
+            elif teacher_move in {"recompute_step", "continue_from_step"}:
+                objective = "recompute_arithmetic"
+            else:
+                objective = "clarify_answer_format"
+            disclosure_policy = "none" if disclosure_budget <= 0 else ("medium" if disclosure_budget >= 2 else "low")
+            step_requirement = "required" if target_step_id else "none"
+            return {
+                "intervention_posture": "corrective",
+                "primary_objective": objective,
+                "disclosure_policy": disclosure_policy,
+                "step_grounding_requirement": step_requirement,
+                "candidate_target_step_id": target_step_id,
+                "candidate_focus_step_ids": [target_step_id] if target_step_id else [],
+                "focus_semantics": deepcopy(payload.get("focus_points", [])),
+                "uncertain_pedagogical_concerns": [],
+                "pedagogical_goal": payload.get("pedagogical_goal", ""),
+                "student_action": payload.get("student_action"),
+                "rationale": payload.get("rationale", ""),
+                "confidence": float(payload.get("confidence", 0.9)),
+                "notes": list(payload.get("notes", [])),
+            }
+        raise KeyError(task_name)
 
     def generate_json(
         self,
@@ -24,14 +368,19 @@ class FakeLLMClient:
         max_tokens=1200,
     ):
         self.calls.append(task_name)
-        response = self.responses[task_name]
-        if isinstance(response, list):
-            if not response:
-                raise AssertionError(f"No queued response left for task '{task_name}'")
-            response = response.pop(0)
-        if isinstance(response, Exception):
-            raise response
-        return deepcopy(response)
+        if task_name in self.responses:
+            return self._consume(task_name)
+        if task_name == "diagnosis_state" and (
+            "diagnosis_state" in self.responses or "diagnosis_interpretation" in self.responses
+        ):
+            return self._diagnosis_payload_for_task(task_name)
+        if task_name == "pedagogy_state" and ("pedagogy_state" in self.responses or "hint_strategy" in self.responses):
+            return self._pedagogy_payload_for_task(task_name)
+        if task_name.startswith("problem_formalizer_") and "problem_formalizer" in self.responses:
+            return self._problem_payload_for_task(task_name, user_prompt)
+        if task_name.startswith("student_work_") and "student_work_formalizer" in self.responses:
+            return self._student_payload_for_task(task_name)
+        raise KeyError(task_name)
 
 
 def _simple_problem_formalization():
@@ -92,9 +441,10 @@ def test_problem_formalizer_uses_llm_when_available():
 
     assert result.provenance.value == "llm"
     assert "llm_formalization_used" in result.notes
-    assert "llm_semantic_sketch_used" in result.notes
+    assert "llm_semantic_state_used" in result.notes
+    assert "llm_executable_commitment_used" in result.notes
     assert result.problem_graph is not None
-    assert client.calls == ["problem_formalizer"]
+    assert client.calls == ["problem_formalizer_semantic_state", "problem_formalizer_executable_commitment"]
 
 
 def test_problem_formalizer_retries_after_invalid_graph_feedback():
@@ -122,8 +472,12 @@ def test_problem_formalizer_retries_after_invalid_graph_feedback():
 
     assert result.provenance.value == "llm"
     assert "llm_formalization_used" in result.notes
-    assert "llm_formalization_repaired_after:2" in result.notes
-    assert client.calls == ["problem_formalizer", "problem_formalizer"]
+    assert "llm_executable_commitment_repaired_after:2" in result.notes
+    assert client.calls == [
+        "problem_formalizer_semantic_state",
+        "problem_formalizer_executable_commitment",
+        "problem_formalizer_executable_commitment",
+    ]
 
 
 def test_problem_formalizer_applies_local_semantic_repairs_to_derived_target():
@@ -387,8 +741,9 @@ def test_student_work_formalizer_uses_llm_to_parse_word_number_answer():
 
     assert result.normalized_final_answer == 8.0
     assert "llm_student_parse_used" in result.notes
-    assert "llm_student_semantic_sketch_used" in result.notes
-    assert client.calls == ["student_work_formalizer"]
+    assert "llm_student_semantic_state_used" in result.notes
+    assert "llm_student_trace_commitment_used" in result.notes
+    assert client.calls == ["student_work_semantic_state", "student_work_trace_commitment"]
 
 
 def test_student_work_formalizer_retries_after_invalid_ref_feedback():
@@ -421,8 +776,12 @@ def test_student_work_formalizer_retries_after_invalid_ref_feedback():
 
     assert result.normalized_final_answer == 8.0
     assert result.selected_target_ref == "how_many_apples_are_there"
-    assert "llm_student_parse_repaired_after:2" in result.notes
-    assert client.calls == ["student_work_formalizer", "student_work_formalizer"]
+    assert "llm_student_trace_commitment_used" in result.notes
+    assert client.calls == [
+        "student_work_semantic_state",
+        "student_work_semantic_state",
+        "student_work_trace_commitment",
+    ]
 
 
 def test_student_work_formalizer_rebuilds_trace_from_surface_text_sketch():
@@ -482,8 +841,8 @@ def test_student_work_formalizer_rebuilds_trace_from_surface_text_sketch():
     assert result.steps[0].extracted_value == 9.0
     assert "student_fact_1" in result.steps[0].referenced_ids
     assert any(node.node_id == "student_fact_1" for node in (result.student_graph.nodes if result.student_graph else []))
-    assert "llm_student_semantic_sketch_used" in result.notes
-    assert client.calls == ["student_work_formalizer"]
+    assert "llm_student_semantic_state_used" in result.notes
+    assert client.calls == ["student_work_semantic_state", "student_work_trace_commitment"]
 
 
 def test_student_work_formalizer_repairs_target_ref_prunes_unused_facts_and_drops_placeholders():
@@ -550,7 +909,7 @@ def test_student_work_formalizer_repairs_target_ref_prunes_unused_facts_and_drop
     assert any(note == "local_step_repair:dropped_ungrounded_input_value" for note in result.steps[0].notes)
     assert any(note == "local_step_repair:dropped_ungrounded_extracted_value" for note in result.steps[0].notes)
     assert result.confidence > 0.0
-    assert client.calls == ["student_work_formalizer"]
+    assert client.calls == ["student_work_semantic_state", "student_work_trace_commitment"]
 
 
 def test_diagnosis_uses_llm_refinement():
@@ -559,26 +918,30 @@ def test_diagnosis_uses_llm_refinement():
     reference = solve_problem(problem_text)
     student = formalize_student_work("3 + 5 = 9\nAnswer is 9.", problem=problem, reference=reference)
     evidence = build_diagnosis_evidence(problem, reference, student)
+    context = build_diagnosis_context(problem, reference, student, evidence)
     client = FakeLLMClient(
         {
-            "diagnosis": {
+            "diagnosis_interpretation": {
                 "diagnosis_label": "arithmetic_error",
                 "subtype": "intermediate_calculation_error",
                 "localization": "intermediate_step",
-                "target_step_id": "step_1_add_all",
+                "candidate_target_step_id": "step_1_add_all",
+                "first_divergence_step_id": "step_1_add_all",
                 "summary": "The student chooses the right setup but computes the sum incorrectly.",
                 "supporting_evidence_types": ["final_answer_mismatch", "step_value_mismatch"],
+                "grounded_evidence": ["final_answer_mismatch", "step_value_mismatch"],
+                "reasoning_points": ["The target is correct, but the computed sum is wrong."],
                 "confidence": 0.91,
-                "notes": ["llm_refined_diagnosis"],
+                "notes": ["llm_refined_interpretation"],
             }
         }
     )
 
-    result = diagnose(evidence, llm_client=client)
+    result = diagnose(evidence, context=context, llm_client=client)
 
     assert result.summary == "The student chooses the right setup but computes the sum incorrectly."
-    assert "llm_diagnosis_used" in result.notes
-    assert client.calls == ["diagnosis"]
+    assert "llm_first_diagnosis_used" in result.notes
+    assert client.calls == ["diagnosis_state"]
 
 
 def test_hint_generator_uses_llm_text_when_verification_passes():
@@ -616,15 +979,31 @@ def test_pipeline_uses_llm_across_all_target_modules():
                 "confidence": 0.92,
                 "notes": ["llm_pipeline_student_parse"],
             },
-            "diagnosis": {
+            "diagnosis_interpretation": {
                 "diagnosis_label": "correct_answer",
                 "subtype": "matches_canonical_reference",
                 "localization": "none",
-                "target_step_id": None,
+                "candidate_target_step_id": None,
+                "first_divergence_step_id": None,
                 "summary": "The student's answer matches the canonical reference.",
                 "supporting_evidence_types": ["correct_final_answer"],
+                "grounded_evidence": ["correct_final_answer"],
+                "reasoning_points": ["The student selected the correct target and final value."],
                 "confidence": 0.93,
-                "notes": ["llm_pipeline_diagnosis"],
+                "notes": ["llm_pipeline_diagnosis_interpretation"],
+            },
+            "hint_strategy": {
+                "teacher_move": "restate_result",
+                "hint_level": "conceptual",
+                "pedagogical_goal": "Acknowledge that the student is already correct.",
+                "student_action": None,
+                "target_step_id": None,
+                "disclosure_budget": 0,
+                "focus_points": [],
+                "must_not_reveal": [],
+                "rationale": "No corrective hint is needed for a correct answer.",
+                "confidence": 0.9,
+                "notes": ["llm_pipeline_hint_strategy"],
             },
             "hint_generator": {"hint_text": "Your answer is correct."},
         }
@@ -632,7 +1011,7 @@ def test_pipeline_uses_llm_across_all_target_modules():
 
     result = run_tutoring_pipeline(
         "There are 8 apples. How many apples are there?",
-        "The answer is eight.",
+        "The answer is 8.",
         llm_client=client,
         use_llm=True,
     )
@@ -642,8 +1021,11 @@ def test_pipeline_uses_llm_across_all_target_modules():
     assert result.diagnosis.diagnosis_label == DiagnosisLabel.CORRECT_ANSWER
     assert result.hint_result.hint_text == "Your answer is correct."
     assert client.calls == [
-        "problem_formalizer",
-        "student_work_formalizer",
-        "diagnosis",
+        "problem_formalizer_semantic_state",
+        "problem_formalizer_executable_commitment",
+        "student_work_semantic_state",
+        "student_work_trace_commitment",
+        "diagnosis_state",
+        "pedagogy_state",
         "hint_generator",
     ]

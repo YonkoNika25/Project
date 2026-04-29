@@ -1,16 +1,19 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.models.schemas import (
+    AnswerAcceptability,
     DiagnosisLabel,
     ErrorLocalization,
     HintLevel,
     HintMode,
     OperationType,
+    ProcessEquivalence,
     ProvenanceSource,
     RelationType,
+    TargetAlignment,
     TraceOperation,
 )
 
@@ -43,6 +46,43 @@ class TeacherMove(str, Enum):
     CONTINUE_FROM_STEP = "continue_from_step"
     RESTATE_RESULT = "restate_result"
     METACOGNITIVE_PROMPT = "metacognitive_prompt"
+
+
+class InterventionPosture(str, Enum):
+    """Posture sư phạm tổng quát trước khi chọn teacher move cụ thể."""
+
+    NONE = "none"
+    ACKNOWLEDGE_CORRECT = "acknowledge_correct"
+    REFLECTIVE_OPTIONAL = "reflective_optional"
+    CORRECTIVE = "corrective"
+
+
+class PedagogicalObjective(str, Enum):
+    """Mục tiêu sư phạm chính ở tầng planning nội bộ."""
+
+    NONE = "none"
+    CLARIFY_ANSWER_FORMAT = "clarify_answer_format"
+    REFOCUS_TARGET = "refocus_target"
+    REPAIR_QUANTITY_RELATIONSHIP = "repair_quantity_relationship"
+    RECOMPUTE_ARITHMETIC = "recompute_arithmetic"
+    REINFORCE_UNDERSTANDING = "reinforce_understanding"
+    CLARIFY_STATE = "clarify_state"
+
+
+class DisclosurePolicy(str, Enum):
+    """Mức tiết lộ ở tầng planning nội bộ trước khi map sang disclosure budget."""
+
+    NONE = "none"
+    LOW = "low"
+    MEDIUM = "medium"
+
+
+class StepGroundingRequirement(str, Enum):
+    """Mức độ cần neo chiến lược vào một canonical step cụ thể."""
+
+    NONE = "none"
+    OPTIONAL = "optional"
+    REQUIRED = "required"
 
 
 class ProblemGraphNodeType(str, Enum):
@@ -700,9 +740,9 @@ class DiagnosisEvidence(BaseModel):
     evidence_items: List[EvidenceItem] = Field(default_factory=list)
     # Bản đồ alignment giữa step reference và step student.
     alignment_map: List[Dict[str, Any]] = Field(default_factory=list)
-    # Step divergence đầu tiên nếu tìm được.
+    # Candidate step divergence ở mức mechanical/factual; diagnosis layer có thể dùng hoặc bỏ qua.
     first_divergence_step_id: Optional[str] = Field(default=None)
-    # Các cơ chế lỗi có khả năng cao do builder suy ra.
+    # Compatibility field. Builder hiện không còn suy diễn mạnh cơ chế lỗi ở layer evidence.
     likely_error_mechanisms: List[str] = Field(default_factory=list)
     # Độ tin cậy tổng quát của evidence.
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -710,6 +750,337 @@ class DiagnosisEvidence(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
+
+
+class DiagnosisContextQuantity(BaseModel):
+    """Compact problem-side quantity context used by the diagnosis module."""
+
+    quantity_id: str
+    surface_text: Optional[str] = Field(default=None)
+    value: Optional[float] = Field(default=None)
+    semantic_role: Optional[str] = Field(default=None)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DiagnosisReferenceStepContext(BaseModel):
+    """Compact canonical-step context for diagnosis interpretation."""
+
+    step_id: str
+    operation: str
+    input_refs: List[str] = Field(default_factory=list)
+    output_ref: str
+    output_value: Optional[float] = Field(default=None)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DiagnosisStudentStepContext(BaseModel):
+    """Compact student-step context for diagnosis interpretation."""
+
+    step_id: str
+    raw_text: Optional[str] = Field(default=None)
+    operation: Optional[str] = Field(default=None)
+    extracted_value: Optional[float] = Field(default=None)
+    referenced_ids: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DiagnosisEvidenceSnapshot(BaseModel):
+    """Compact evidence snapshot passed into diagnosis LLM prompts."""
+
+    evidence_types: List[str] = Field(default_factory=list)
+    first_divergence_step_id: Optional[str] = Field(default=None)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+    alignment_focus: List[Dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DiagnosisContext(BaseModel):
+    """Compact, typed diagnosis context built downstream of evidence construction."""
+
+    problem_text: Optional[str] = Field(default=None)
+    target_variable: Optional[str] = Field(default=None)
+    target_quantity_id: Optional[str] = Field(default=None)
+    target_surface_text: Optional[str] = Field(default=None)
+    target_description: Optional[str] = Field(default=None)
+    problem_quantities: List[DiagnosisContextQuantity] = Field(default_factory=list)
+    reference_final_answer: Optional[float] = Field(default=None)
+    reference_target_ref: Optional[str] = Field(default=None)
+    reference_steps: List[DiagnosisReferenceStepContext] = Field(default_factory=list)
+    student_raw_answer: Optional[str] = Field(default=None)
+    student_normalized_final_answer: Optional[float] = Field(default=None)
+    student_mode: Optional[str] = Field(default=None)
+    student_selected_target_ref: Optional[str] = Field(default=None)
+    student_steps: List[DiagnosisStudentStepContext] = Field(default_factory=list)
+    student_semantic_fact_labels: List[str] = Field(default_factory=list)
+    evidence_snapshot: Optional[DiagnosisEvidenceSnapshot] = Field(default=None)
+    notes: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DiagnosisInterpretation(BaseModel):
+    """Internal diagnosis artifact produced by the LLM before projection into DiagnosisResult."""
+
+    diagnosis_label: DiagnosisLabel
+    subtype: Optional[str] = Field(default=None)
+    localization: ErrorLocalization = Field(default=ErrorLocalization.UNKNOWN)
+    candidate_target_step_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("candidate_target_step_id", "target_step_id"),
+    )
+    first_divergence_step_id: Optional[str] = Field(default=None)
+    summary: str = Field(default="")
+    supporting_evidence_types: List[str] = Field(default_factory=list)
+    grounded_evidence: Any = Field(
+        default=None,
+        validation_alias=AliasChoices("grounded_evidence", "evidence"),
+    )
+    reasoning_points: List[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    notes: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @staticmethod
+    def _coerce_string_list(value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            normalized = value.strip()
+            return [normalized] if normalized else []
+        if isinstance(value, (list, tuple, set)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return value
+
+    @field_validator("supporting_evidence_types", "reasoning_points", "notes", mode="before")
+    @classmethod
+    def coerce_list_fields(cls, value: Any) -> Any:
+        return cls._coerce_string_list(value)
+
+    @model_validator(mode="after")
+    def validate_summary(self):
+        if not self.summary.strip():
+            raise ValueError("summary must not be empty")
+        return self
+
+
+class DiagnosisState(BaseModel):
+    """Internal intervention diagnosis state before projection into public labels."""
+
+    answer_acceptability: AnswerAcceptability
+    target_alignment: TargetAlignment
+    process_equivalence: ProcessEquivalence = Field(default=ProcessEquivalence.UNKNOWN)
+    intervention_required: bool = Field(default=True)
+    verified_error_mechanisms: List[str] = Field(default_factory=list)
+    uncertain_concerns: List[str] = Field(default_factory=list)
+    candidate_localization: ErrorLocalization = Field(
+        default=ErrorLocalization.UNKNOWN,
+        validation_alias=AliasChoices("candidate_localization", "localization_hint"),
+    )
+    candidate_target_step_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("candidate_target_step_id", "target_step_id"),
+    )
+    candidate_focus_step_ids: List[str] = Field(default_factory=list)
+    supporting_evidence_types: List[str] = Field(default_factory=list)
+    grounded_evidence: Any = Field(
+        default=None,
+        validation_alias=AliasChoices("grounded_evidence", "evidence"),
+    )
+    key_findings: List[str] = Field(default_factory=list)
+    summary: str = Field(default="")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    notes: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_payload(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        data = dict(value)
+
+        if "answer_acceptability" not in data and "answer_status" in data:
+            legacy_answer = str(data.get("answer_status", "")).strip()
+            data["answer_acceptability"] = {
+                "correct": AnswerAcceptability.ACCEPTABLE.value,
+                "incorrect": AnswerAcceptability.UNACCEPTABLE.value,
+                "unparseable": AnswerAcceptability.UNPARSEABLE.value,
+            }.get(legacy_answer, AnswerAcceptability.UNACCEPTABLE.value)
+
+        if "target_alignment" not in data and "target_status" in data:
+            legacy_target = str(data.get("target_status", "")).strip()
+            data["target_alignment"] = {
+                "correct": TargetAlignment.ALIGNED.value,
+                "wrong": TargetAlignment.MISALIGNED.value,
+                "unknown": TargetAlignment.UNKNOWN.value,
+            }.get(legacy_target, TargetAlignment.UNKNOWN.value)
+
+        if "process_equivalence" not in data and "process_status" in data:
+            legacy_process = str(data.get("process_status", "")).strip()
+            data["process_equivalence"] = {
+                "canonical": ProcessEquivalence.CANONICAL.value,
+                "equivalent_noncanonical": ProcessEquivalence.EQUIVALENT_NONCANONICAL.value,
+                "partial": ProcessEquivalence.PARTIAL_OR_NOISY_BUT_ACCEPTABLE.value,
+                "noisy_but_valid": ProcessEquivalence.PARTIAL_OR_NOISY_BUT_ACCEPTABLE.value,
+                "inconsistent": ProcessEquivalence.INCONSISTENT.value,
+                "unknown": ProcessEquivalence.UNKNOWN.value,
+            }.get(legacy_process, ProcessEquivalence.UNKNOWN.value)
+
+        if "verified_error_mechanisms" not in data:
+            mechanisms: List[str] = []
+            if str(data.get("answer_status", "")).strip() == "unparseable":
+                mechanisms.append("answer_not_numeric")
+            if str(data.get("target_status", "")).strip() == "wrong":
+                mechanisms.append("wrong_target_selected")
+            if str(data.get("relationship_status", "")).strip() == "invalid":
+                mechanisms.append("quantity_relationship_invalid")
+            if str(data.get("arithmetic_status", "")).strip() == "invalid":
+                mechanisms.append("arithmetic_execution_invalid")
+            data["verified_error_mechanisms"] = mechanisms
+
+        if "uncertain_concerns" not in data:
+            concerns: List[str] = []
+            legacy_process = str(data.get("process_status", "")).strip()
+            if legacy_process == "equivalent_noncanonical":
+                concerns.append("alternate_noncanonical_process")
+            elif legacy_process in {"partial", "noisy_but_valid"}:
+                concerns.append("partial_or_noisy_process")
+            data["uncertain_concerns"] = concerns
+
+        if "intervention_required" not in data:
+            answer_acceptability = str(data.get("answer_acceptability", "")).strip()
+            target_alignment = str(data.get("target_alignment", "")).strip()
+            verified_error_mechanisms = data.get("verified_error_mechanisms") or []
+            data["intervention_required"] = not (
+                answer_acceptability == AnswerAcceptability.ACCEPTABLE.value
+                and target_alignment == TargetAlignment.ALIGNED.value
+                and not verified_error_mechanisms
+            )
+        if "candidate_target_step_id" not in data and "first_divergence_step_id" in data:
+            data["candidate_target_step_id"] = data.get("first_divergence_step_id")
+
+        for legacy_key in (
+            "answer_status",
+            "target_status",
+            "relationship_status",
+            "arithmetic_status",
+            "process_status",
+            "pedagogical_priorities",
+            "first_divergence_step_id",
+        ):
+            data.pop(legacy_key, None)
+
+        return data
+
+    @field_validator(
+        "verified_error_mechanisms",
+        "uncertain_concerns",
+        "candidate_focus_step_ids",
+        "supporting_evidence_types",
+        "key_findings",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def coerce_list_fields(cls, value: Any) -> Any:
+        return DiagnosisInterpretation._coerce_string_list(value)
+
+    @model_validator(mode="after")
+    def validate_summary(self):
+        if not self.summary.strip():
+            raise ValueError("summary must not be empty")
+        if (
+            self.answer_acceptability == AnswerAcceptability.ACCEPTABLE
+            and self.target_alignment == TargetAlignment.ALIGNED
+            and not self.verified_error_mechanisms
+        ):
+            self.intervention_required = False
+        if not self.intervention_required and self.verified_error_mechanisms:
+            self.verified_error_mechanisms = []
+        if (
+            not self.intervention_required
+            and self.answer_acceptability == AnswerAcceptability.ACCEPTABLE
+            and self.target_alignment == TargetAlignment.ALIGNED
+        ):
+            self.candidate_localization = ErrorLocalization.NONE
+            self.candidate_target_step_id = None
+        return self
+
+
+class PedagogyState(BaseModel):
+    """Internal pedagogical state before projection into concrete teacher moves."""
+
+    intervention_posture: InterventionPosture
+    primary_objective: PedagogicalObjective = Field(default=PedagogicalObjective.NONE)
+    disclosure_policy: DisclosurePolicy = Field(default=DisclosurePolicy.LOW)
+    step_grounding_requirement: StepGroundingRequirement = Field(default=StepGroundingRequirement.NONE)
+    candidate_target_step_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("candidate_target_step_id", "target_step_id"),
+    )
+    candidate_focus_step_ids: List[str] = Field(default_factory=list)
+    focus_semantics: List[str] = Field(default_factory=list)
+    uncertain_pedagogical_concerns: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "uncertain_pedagogical_concerns",
+            "uncertain_pedagogical_conerns",
+        ),
+    )
+    pedagogical_goal: str = Field(default="")
+    student_action: Optional[str] = Field(default=None)
+    rationale: str = Field(default="")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    notes: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator(
+        "candidate_focus_step_ids",
+        "focus_semantics",
+        "uncertain_pedagogical_concerns",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def coerce_list_fields(cls, value: Any) -> Any:
+        return DiagnosisInterpretation._coerce_string_list(value)
+
+    @model_validator(mode="after")
+    def normalize_state(self):
+        if self.intervention_posture in {InterventionPosture.NONE, InterventionPosture.ACKNOWLEDGE_CORRECT}:
+            self.primary_objective = PedagogicalObjective.NONE
+            self.disclosure_policy = DisclosurePolicy.NONE
+            self.step_grounding_requirement = StepGroundingRequirement.NONE
+            self.candidate_target_step_id = None
+            self.candidate_focus_step_ids = []
+        elif self.intervention_posture == InterventionPosture.REFLECTIVE_OPTIONAL:
+            if self.primary_objective == PedagogicalObjective.NONE:
+                self.primary_objective = PedagogicalObjective.REINFORCE_UNDERSTANDING
+            if self.disclosure_policy == DisclosurePolicy.NONE and self.focus_semantics:
+                self.disclosure_policy = DisclosurePolicy.LOW
+        elif self.primary_objective == PedagogicalObjective.NONE:
+            self.primary_objective = PedagogicalObjective.CLARIFY_STATE
+
+        if self.step_grounding_requirement == StepGroundingRequirement.NONE:
+            self.candidate_target_step_id = None
+            self.candidate_focus_step_ids = []
+        elif self.candidate_target_step_id and self.candidate_target_step_id not in self.candidate_focus_step_ids:
+            self.candidate_focus_step_ids = [self.candidate_target_step_id, *self.candidate_focus_step_ids]
+
+        if not self.pedagogical_goal.strip():
+            raise ValueError("pedagogical_goal must not be empty")
+        if not self.rationale.strip():
+            raise ValueError("rationale must not be empty")
+        return self
 
 
 class GraphValidationIssue(BaseModel):
@@ -812,6 +1183,39 @@ class HintPlan(BaseModel):
         return self
 
 
+class HintStrategy(BaseModel):
+    """Model-led pedagogical strategy before projection into the public hint plan."""
+
+    teacher_move: TeacherMove
+    hint_level: HintLevel
+    pedagogical_goal: str = Field(default="")
+    student_action: Optional[str] = Field(default=None)
+    target_step_id: Optional[str] = Field(default=None)
+    disclosure_budget: int = Field(default=1, ge=0, le=5)
+    focus_points: List[str] = Field(default_factory=list)
+    must_not_reveal: List[str] = Field(default_factory=list)
+    rationale: str = Field(default="")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    notes: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("focus_points", "must_not_reveal", "notes", mode="before")
+    @classmethod
+    def coerce_list_fields(cls, value: Any) -> Any:
+        return DiagnosisInterpretation._coerce_string_list(value)
+
+    @model_validator(mode="after")
+    def validate_text_fields(self):
+        if not self.pedagogical_goal.strip():
+            raise ValueError("pedagogical_goal must not be empty")
+        if not self.rationale.strip():
+            raise ValueError("rationale must not be empty")
+        if self.disclosure_budget == 0 and self.focus_points:
+            raise ValueError("focus_points should be empty when disclosure_budget is 0")
+        return self
+
+
 class HintResult(BaseModel):
     """Kết quả hint cuối cùng trả cho người học."""
     # Nội dung hint bằng text.
@@ -861,8 +1265,11 @@ class TutoringResult(BaseModel):
     evidence: DiagnosisEvidence
     # Diagnosis cuối cùng.
     diagnosis: DiagnosisResult
+    diagnosis_state: Optional[DiagnosisState] = Field(default=None)
     # Kế hoạch sư phạm trước khi sinh hint.
+    pedagogy_state: Optional[PedagogyState] = Field(default=None)
     hint_plan: HintPlan
+    hint_strategy: Optional[HintStrategy] = Field(default=None)
     # Hint cuối cùng trả ra.
     hint_result: HintResult
 

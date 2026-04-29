@@ -161,17 +161,6 @@ def build_student_work_graph(
         )
 
         input_refs_for_graph: list[str] = list(step.referenced_ids)
-        for input_value in step.input_values:
-            matched_source = next(
-                (
-                    source_node_id
-                    for source_node_id, source_value in reversed(value_sources)
-                    if abs(source_value - input_value) < 1e-9 and source_node_id not in input_refs_for_graph
-                ),
-                None,
-            )
-            if matched_source is not None:
-                input_refs_for_graph.append(matched_source)
 
         for position, ref_id in enumerate(input_refs_for_graph):
             _append_edge(
